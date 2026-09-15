@@ -6,7 +6,7 @@ Robocasa only introduces assets for the environment and different tasks, not for
 All robots are defined in Robosuite. 
 To keep this consistent, you will need to import all of the files in the current folder (`mobipi/assets/robosuite`) into their respective places in the robosuite library.
 Note that the folder distribution mimics the one in the library, which should make copying the files over much easier.
-Once coppied over, the robot should be available to use in Robocasa.
+Once coppied over, you need to add some `__init__.py`s and the robot should be available to use in Robocasa.
 
 The library is located inside the conda environment, that is `~/anaconda3/envs/mobipi/lib/python3.10/site-packages/robosuite` (note that the path might be slightly different for you, depends on where your conda installation resides).
 Open this folder, and copy over the files from this repo inside their respective folders in the robosuite library.
@@ -28,6 +28,62 @@ Open this folder, and copy over the files from this repo inside their respective
   - A config containing controller configuration for the RBY1 robot.
   - Once again inspired by the Tiago config.
   - **NOTE**: a lot of the values (damping, PD coefficients, etc.) were just coppied over from the Tiago config, and may need changing in the future.
+
+## Steps:
+1.) copy over the files at the top
+
+2.) Go to `robosuite/models/robots/manipulators/__init__.py` and add this line
+```python
+from .rby1_robot import RBY1
+```
+3.) Go to  `robosuite/models/grippers/__init__.py` and add an import 
+```python
+from .rby1_gripper import RBY1Gripper
+```
+and a mapping
+```python
+GRIPPER_MAPPING ={
+    ...
+    "RBY1Gripper": RBY1Gripper,
+    ...
+}
+```
+4.) Go to `robosuite/robots/__init__.py` and add RBY1 to the mapping
+```python
+ROBOT_CLASS_MAPPING = {
+    ...
+    "RBY1": WheeledRobot,
+    ...
+}
+```
+
+5.) Go to `robosuite/controllers/parts/mobile_base/joint_vel.py`, find this block 
+```python
+base_action = np.copy([action[i] for i in [1, 0, 2]])
+# input raw base action is delta relative to current pose of base
+# controller expects deltas relative to initial pose of base at start of episode
+# transform deltas from current base pose coordinates to initial base pose coordinates
+x, y = base_action[0:2]
+
+# do the reverse of theta rotation
+base_action[0] = x * np.cos(theta) + y * np.sin(theta)
+base_action[1] = -x * np.sin(theta) + y * np.cos(theta)
+```
+and replace it with 
+```python
+if jnt_dim == 3:
+    base_action = np.copy([action[i] for i in [1, 0, 2]])
+    # input raw base action is delta relative to current pose of base
+    # controller expects deltas relative to initial pose of base at start of episode
+    # transform deltas from current base pose coordinates to initial base pose coordinates
+    x, y = base_action[0:2]
+
+    # do the reverse of theta rotation
+    base_action[0] = x * np.cos(theta) + y * np.sin(theta)
+    base_action[1] = -x * np.sin(theta) + y * np.cos(theta)
+else:
+    base_action = np.asarray(action).copy()
+```
 
 ## Verification
 To ensure the model was imported correctly, run the `rby1_import_test.py` file, which opens a Robosuite environment called 'Lift'.
