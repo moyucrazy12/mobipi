@@ -84,6 +84,7 @@ echo "🎯 Installing main package..."
 pip install -e .
 
 # ---- Correct a few package versions ----
-pip install nerfstudio==1.1.5 scikit-optimize cma sentencepiece peft==0.10.0 transformers==4.36.0 huggingface-hub==0.25.0 numpy==1.23.3 timm==1.0.12
+pip install nerfstudio==1.1.5 scikit-optimize cma sentencepiece peft==0.10.0 transformers==4.36.0 huggingface-hub==0.25.0 numpy==1.23.3
+pip install --upgrade --no-deps timm==1.0.12
 
 echo "✅ All done!"
