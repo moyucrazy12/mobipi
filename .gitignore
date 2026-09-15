@@ -13,3 +13,5 @@ data/
 scene_data/
 mobipi/macros_private.py
 !install.sh
+
+.vscode/
