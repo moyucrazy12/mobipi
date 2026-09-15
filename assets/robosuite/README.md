@@ -11,6 +11,16 @@ Once coppied over, you need to add some `__init__.py`s and the robot should be a
 The library is located inside the conda environment, that is `~/anaconda3/envs/mobipi/lib/python3.10/site-packages/robosuite` (note that the path might be slightly different for you, depends on where your conda installation resides).
 Open this folder, and copy over the files from this repo inside their respective folders in the robosuite library.
 
+## Automated installation
+
+Run the installer with the Conda environment directory as its only argument:
+
+```bash
+./assets/robosuite/install_rby1.sh ~/anaconda3/envs/mobipi
+```
+
+The script locates `robosuite` inside the environment, copies the RB-Y1 assets, applies the registration and mobile-base changes below, and creates one-time `.pre-rby1` backups of patched files. It is safe to run more than once.
+
 ## File specification
 - `robosuite/models/assets/robots/rby1a`
   - This folder contains the geometry of the robot, i.e. the `.xml` file and the meshes.
