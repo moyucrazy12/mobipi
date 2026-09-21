@@ -32,23 +32,29 @@ if [[ ! -x "$PYTHON_BIN" ]]; then
     exit 1
 fi
 
-shopt -s nullglob
-ROBOSUITE_CANDIDATES=("$CONDA_ENV"/lib/python*/site-packages/robosuite)
-shopt -u nullglob
+ROBOSUITE_VERSION="$("$PYTHON_BIN" - <<'PY'
+from importlib.metadata import version
+print(version("robosuite"))
+PY
+)"
 
-if [[ ${#ROBOSUITE_CANDIDATES[@]} -eq 0 ]]; then
-    echo "robosuite was not found under $CONDA_ENV/lib/python*/site-packages." >&2
-    echo "Install the Mobi-π dependencies in this Conda environment first." >&2
+if [[ "$ROBOSUITE_VERSION" != "1.5.0" ]]; then
+    echo "Unsupported robosuite version: $ROBOSUITE_VERSION" >&2
+    echo "This installer is tested with robosuite 1.5.0." >&2
     exit 1
 fi
 
-if [[ ${#ROBOSUITE_CANDIDATES[@]} -ne 1 ]]; then
-    echo "Expected one robosuite installation, found ${#ROBOSUITE_CANDIDATES[@]}:" >&2
-    printf '  %s\n' "${ROBOSUITE_CANDIDATES[@]}" >&2
-    exit 1
-fi
+ROBOSUITE_DIR="$("$PYTHON_BIN" - <<'PY'
+from importlib.util import find_spec
+from pathlib import Path
 
-ROBOSUITE_DIR="${ROBOSUITE_CANDIDATES[0]}"
+spec = find_spec("robosuite")
+if spec is None or not spec.submodule_search_locations:
+    raise SystemExit("robosuite is not installed")
+
+print(Path(next(iter(spec.submodule_search_locations))).resolve())
+PY
+)"
 
 REQUIRED_SOURCES=(
     "$SOURCE_DIR/models/assets/robots/rby1a/rby1a_1.2.xml"

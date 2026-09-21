@@ -6,8 +6,7 @@ Robocasa only introduces assets for the environment and different tasks, not for
 All robots are defined in Robosuite. 
 To keep this consistent, you will need to import all of the files in the current folder (`mobipi/assets/robosuite`) into their respective places in the robosuite library.
 Note that the folder distribution mimics the one in the library, which should make copying the files over much easier.
-Once coppied over, you need to add some `__init__.py`s and the robot should be available to use in Robocasa.
-
+Once copied over, some RoboSuite registration files need to be modified before the robot becomes available in RoboCasa.
 The library is located inside the conda environment, that is `~/anaconda3/envs/mobipi/lib/python3.10/site-packages/robosuite` (note that the path might be slightly different for you, depends on where your conda installation resides).
 Open this folder, and copy over the files from this repo inside their respective folders in the robosuite library.
 
@@ -19,7 +18,9 @@ Run the installer with the Conda environment directory as its only argument:
 ./assets/robosuite/install_rby1.sh ~/anaconda3/envs/mobipi
 ```
 
-The script locates `robosuite` inside the environment, copies the RB-Y1 assets, applies the registration and mobile-base changes below, and creates one-time `.pre-rby1` backups of patched files. It is safe to run more than once.
+The automated installer is the recommended way of importing the model. The manual steps below document what the script changes and can also be used for debugging.
+The installer has been tested with RoboSuite 1.5.0.
+The automated installer is the recommended way of importing the model. The manual steps below document what the script changes and can also be used for debugging.
 
 ## File specification
 - `robosuite/models/assets/robots/rby1a`
@@ -67,7 +68,9 @@ ROBOT_CLASS_MAPPING = {
 }
 ```
 
-5.) Go to `robosuite/controllers/parts/mobile_base/joint_vel.py`, find this block 
+5.) The default RoboSuite mobile-base controller assumes a 3-DOF base action. The RB-Y1 model used here exposes two wheel joints, so the controller needs to handle this case separately.
+
+Go to `robosuite/controllers/parts/mobile_base/joint_vel.py`, find this block 
 ```python
 base_action = np.copy([action[i] for i in [1, 0, 2]])
 # input raw base action is delta relative to current pose of base
@@ -98,3 +101,7 @@ else:
 ## Verification
 To ensure the model was imported correctly, run the `rby1_import_test.py` file, which opens a Robosuite environment called 'Lift'.
 You should see the robot from the front view executing a waving maneuver.
+
+```bash
+python assets/robosuite/rby1_import_test.py
+```
