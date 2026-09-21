@@ -7,14 +7,15 @@ import math
 controller_config = load_composite_controller_config(robot="RBY1")
 
 env = robocasa.make(
-    env_name="Lift", # CloseDrawer (RoboCasa environment), ...
+    env_name="CloseDrawer", #  (RoboCasa environment)
     robots="RBY1",
     controller_configs=controller_config,
     initialization_noise=None,
     use_camera_obs=False,
     has_renderer=True,
     has_offscreen_renderer=False,
-    render_camera='frontview', # robot0_head_camera, robot0_right_eye_in_hand, robot0_left_eye_in_hand
+    renderer="mjviewer", # Uncomment this when using preview to use the MJViewer renderer
+    render_camera='freeview', # None (=freeview), robot0_head_camera, robot0_right_eye_in_hand, robot0_left_eye_in_hand
 )
 
 env.reset()
