@@ -239,7 +239,7 @@
                                   <site name="right_ee_x" pos="0 0 0" size="0.005 .1" quat="0.707105 0.707108 0 0" rgba="1 0 0 0" type="cylinder" group="1"/>
                                   <site name="right_ee_y" pos="0 0 0" size="0.005 .1" quat="0.707105 0 0.707108 0" rgba="0 1 0 0" type="cylinder" group="1"/>
                                   <site name="right_ee_z" pos="0 0 0" size="0.005 .1" quat="0.707105 0 0 0.707108" rgba="0 0 1 0" type="cylinder" group="1"/>
-                                  <camera mode="fixed" name="right_eye_in_hand" pos="0.05 0 0" quat="0 0.707108 0.707108 0" fovy="75"/>
+                                  <camera mode="fixed" name="right_eye_in_hand" pos="-0.004507292041 -0.094660066636 -0.172747310844" quat="0.680140411110 0.129638020438 -0.134148068544 0.708948023862" fovy="57.794"/>
                                 </body>
                                 <inertial pos="0.00024951 -0.00019562 -0.10711314" mass="0.42751673"
                                   fullinertia="0.00029613 0.00030651 0.00048946 -0.00000186 -0.00000157 0.00000221"/>
@@ -347,7 +347,7 @@
                                   <site name="left_ee_x" pos="0 0 0" size="0.005 .1" quat="0.707105 0.707108 0 0" rgba="1 0 0 0" type="cylinder" group="1"/>
                                   <site name="left_ee_y" pos="0 0 0" size="0.005 .1" quat="0.707105 0 0.707108 0" rgba="0 1 0 0" type="cylinder" group="1"/>
                                   <site name="left_ee_z" pos="0 0 0" size="0.005 .1" quat="0.707105 0 0 0.707108" rgba="0 0 1 0" type="cylinder" group="1"/>
-                                  <camera mode="fixed" name="left_eye_in_hand" pos="0.05 0 0" quat="0 0.707108 0.707108 0" fovy="75"/>
+                                  <camera mode="fixed" name="left_eye_in_hand" pos="-0.004507292041 0.094660066636 -0.172747310844" quat="0.680140410902 -0.129638019228 -0.134148067771 -0.708948023483" fovy="57.794"/>
                                 </body>
                                 <inertial pos="-0.00024951 0.00019562 -0.10711314" mass="0.42751673"
                                   fullinertia="0.00029613 0.00030651 0.00048946 -0.00000186 0.00000157 -0.00000221"/>
@@ -408,8 +408,7 @@
                       <geom mesh="NECK_2_1" material="69,69,69" class="visual"/>
                       <geom mesh="NECK_2_0" class="in-model-collision"/>
                       <geom mesh="NECK_2_1" class="in-model-collision"/>
-                      <camera mode="fixed" name="head_camera" pos="0.12 0 0.08"
-                        quat="0 0.707108 0.707108 0" fovy="75"/>
+                      <camera mode="fixed" name="head_camera" pos="0.016982486 0.021241971 0.10" quat="0.503507599548 0.503582476482 -0.495691622991 -0.497166573167" fovy="68.645"/>
                     </body>
                   </body>
                 </body>
