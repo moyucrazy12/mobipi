@@ -429,8 +429,8 @@
     <exclude body1="ee_finger_l1" body2="ee_finger_l2"/>
   </contact>
   <actuator>
-    <velocity name="left_wheel_act" joint="left_wheel" ctrlrange="-6.28 6.28" kv="10"/>
-    <velocity name="right_wheel_act" joint="right_wheel" ctrlrange="-6.28 6.28" kv="10"/>
+    <velocity name="left_wheel_act" joint="left_wheel" ctrlrange="-3.14 3.14" kv="10"/>
+    <velocity name="right_wheel_act" joint="right_wheel" ctrlrange="-3.14 3.14" kv="10"/>
     <position name="link1_act" joint="torso_0" ctrlrange="-0.261799388 0.261799388" forcelimited="true"
       forcerange="-270 270"/>
     <position name="link2_act" joint="torso_1" ctrlrange="-0.523598776 1.570796327" forcelimited="true"
