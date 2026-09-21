@@ -40,6 +40,12 @@ class RBY1(ManipulatorModel):
         super().__init__(xml_path_completion("robots/rby1a/rby1a_1.2.xml"), idn=idn)
         self._convert_torque_controlled_actuators()
 
+    @property
+    def joints(self):
+        """Return scalar-actuated joints, excluding the free chassis joint."""
+        free_joint = f"robot{self.idn}_world_j"
+        return [joint for joint in super().joints if joint != free_joint]
+
     def _convert_torque_controlled_actuators(self):
         """Convert arm, torso, and head position targets to torque actuators.
 

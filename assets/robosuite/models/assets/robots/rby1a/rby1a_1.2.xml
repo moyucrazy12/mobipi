@@ -97,7 +97,7 @@
     <body name="base">
       <inertial pos="-0.0615794 -0.00142271 0.135139" quat="0.00383057 0.733861 -0.00742942 0.679248" mass="60.0804"
         diaginertia="3.77525 2.99424 1.36264"/>
-      <!-- <joint name="world_j" type="free" limited="false" actuatorfrclimited="false"/> -->
+      <joint name="world_j" type="free" limited="false" actuatorfrclimited="false"/>
       <geom mesh="a_base_0" material="191,191,191" class="visual"/>
       <geom mesh="a_base_1" material="237,255,168" class="visual"/>
       <geom mesh="a_base_2" material="190,188,186" class="visual"/>
@@ -429,8 +429,8 @@
     <exclude body1="ee_finger_l1" body2="ee_finger_l2"/>
   </contact>
   <actuator>
-    <velocity name="left_wheel_act" joint="left_wheel" ctrlrange="-3.14 3.14"/>
-    <velocity name="right_wheel_act" joint="right_wheel" ctrlrange="-3.14 3.14"/>
+    <velocity name="left_wheel_act" joint="left_wheel" ctrlrange="-6.28 6.28" kv="10"/>
+    <velocity name="right_wheel_act" joint="right_wheel" ctrlrange="-6.28 6.28" kv="10"/>
     <position name="link1_act" joint="torso_0" ctrlrange="-0.261799388 0.261799388" forcelimited="true"
       forcerange="-270 270"/>
     <position name="link2_act" joint="torso_1" ctrlrange="-0.523598776 1.570796327" forcelimited="true"

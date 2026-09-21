@@ -15,11 +15,12 @@ env = robocasa.make(
     has_renderer=True,
     has_offscreen_renderer=False,
     renderer="mjviewer", # Uncomment this when using preview to use the MJViewer renderer
-    render_camera='freeview', # None (=freeview), robot0_head_camera, robot0_right_eye_in_hand, robot0_left_eye_in_hand
+    render_camera=None, # None (=freeview), robot0_head_camera, robot0_right_eye_in_hand, robot0_left_eye_in_hand
 )
 
 env.reset()
 
+print("\nAction dim", env.action_dim)
 # 1. Setup parameters for the waving motion
 step_counter = 0
 frequency = 0.01  # Controls how fast the robot waves
@@ -37,6 +38,8 @@ for _ in range(1000):
     
     # Apply the sine wave ONLY to the targeted joint
     action[wave_joint_idx] = wave_signal
+    action[22] = -1
+    action[23] = -1
     
     _, reward, done, _ = env.step(action)
     env.render()
