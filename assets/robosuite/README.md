@@ -30,7 +30,7 @@ The automated installer is the recommended way of importing the model. The manua
   - **NOTE**: at the time of writing, the cameras were just added at random, and are for sure not in the correct position.
 - `robosuite/models/assets/bases/rby1_mount.xml`
   - mostly placeholder file containing empty geometry and 1 coordinate frame.
-  - This is required because robosuite treats the robot manipulators and bases seperate, but since RBY1 already contains a base, we need to add just an empty one.
+  - This is required because robosuite treats the robot manipulators and bases separate, but since RBY1 already contains a base, we need to add just an empty one.
 - `robosuite/models/robots/manipulators/rby1_robot.py`
   - A python wrapper class for the robot (inspired by the Tiago robot class).
 - `robosuite/models/grippers/rby1_gripper.py`
@@ -38,7 +38,7 @@ The automated installer is the recommended way of importing the model. The manua
 - `robosuite/controllers/config/robots/default_rby1.json`
   - A config containing controller configuration for the RBY1 robot.
   - Once again inspired by the Tiago config.
-  - **NOTE**: a lot of the values (damping, PD coefficients, etc.) were just coppied over from the Tiago config, and may need changing in the future.
+  - **NOTE**: a lot of the values (damping, PD coefficients, etc.) were just copied over from the Tiago config, and may need changing in the future.
 
 ## Steps:
 1.) copy over the files at the top
