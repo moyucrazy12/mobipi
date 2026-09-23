@@ -1,0 +1,7 @@
+<mujoco model="rby1_mount">
+    <worldbody>
+        <body name="base" pos="0 0 0">
+            <site name="center" type="sphere" pos="0 0 0" size="0.01" group="1" rgba="0 0 0 0"/>
+        </body>
+    </worldbody>
+</mujoco>
