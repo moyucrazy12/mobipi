@@ -30,5 +30,6 @@
 	- We can reuse the `collect_images.py` script, as we can get the camera2world transforms in the simulator (small changes may be needed based on how we create the environment, but the script is robot agnostic by design)
 - **In real life**
 	- We need to construct a nerfstudio compatible dataset, that means obtain a set of pictures and corresponding camera transforms in the world frame.
-	- OR we can use nerfstudio's `ns-process-data` script, which processes either a video or folder of images into a compatible dataset. This script uses [COLMAP](https://colmap.github.io/) (Structure-from-Motion library) to get the transforms of the pictures.
-- Note that appart from the Gaussian splatting model, the Mobipi method needs a pointcloud for collision detection and navigation.
+	- We can use nerfstudio's `ns-process-data` script, which processes either a video or folder of images into a compatible dataset. This script uses [COLMAP](https://colmap.github.io/) (Structure-from-Motion library) to get the transforms of the pictures.
+	- !!!!**THERE IS A BUG IN THE TRAINING SCRIPT** if you have less then 500 pictures, the dataset is saved on the gpu, where `torch.compile` is used to turn camera poses into a view matrix. This does not work, and will destroy the poses. So either use a big enough dataset, or set  `TORCHDYNAMO_DISABLE=1` as env variable before running the training.
+- Note that appart from the Gaussian splatting model, the Mobipi method needs a pointcloud for collision detection and navigation (this can also be extracted from the nerfstudio's model, although I think we can create a better one from the depth cameras).
