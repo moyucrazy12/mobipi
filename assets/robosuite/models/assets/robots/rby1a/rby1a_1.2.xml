@@ -97,7 +97,6 @@
     <body name="base">
       <inertial pos="-0.0615794 -0.00142271 0.135139" quat="0.00383057 0.733861 -0.00742942 0.679248" mass="60.0804"
         diaginertia="3.77525 2.99424 1.36264"/>
-      <joint name="world_j" type="free" limited="false" actuatorfrclimited="false"/>
       <geom mesh="a_base_0" material="191,191,191" class="visual"/>
       <geom mesh="a_base_1" material="237,255,168" class="visual"/>
       <geom mesh="a_base_2" material="190,188,186" class="visual"/>
@@ -181,6 +180,7 @@
                     <geom mesh="NECK_0" class="in-model-collision"/>
                   </body>
                   <body name="link_right_arm_0" pos="0 -0.22 0.0800735" quat="0.984808 -0.173648 0 0">
+                    <site name="right_center" pos="0 0 0" size="0.01 0.01 0.01" rgba="1 1 0 0" type="sphere" group="1"/>
                     <inertial pos="-0.00316662 0.0343718 -3e-07" quat="0.536676 0.553304 0.439546 0.461122"
                       mass="1.26164" diaginertia="0.00433912 0.00432154 0.00223129"/>
                     <joint name="right_arm_0" pos="0 0 0" axis="0 1 0" limited="true" range="-2.35619 2.35619"/>
@@ -234,7 +234,7 @@
                               <geom size="0.075 0.026" pos="0 0 -0.024" class="in-model-collision"/>
                               <body name="link_right_arm_6">
                                 <body name="right_hand" pos="0 0 0" quat="1 0 0 0">
-                                  <site name="right_center" pos="0 0 0" size="0.01 0.01 0.01" rgba="1 1 0 0" type="sphere" group="1"/>
+                                  
                                   <site name="right_ee" pos="0 0 0" size="0.01 0.01 0.01" rgba="0 0 1 1" type="sphere" group="1"/>
                                   <site name="right_ee_x" pos="0 0 0" size="0.005 .1" quat="0.707105 0.707108 0 0" rgba="1 0 0 0" type="cylinder" group="1"/>
                                   <site name="right_ee_y" pos="0 0 0" size="0.005 .1" quat="0.707105 0 0.707108 0" rgba="0 1 0 0" type="cylinder" group="1"/>
@@ -289,6 +289,7 @@
                     </body>
                   </body>
                   <body name="link_left_arm_0" pos="0 0.22 0.0800735" quat="0.984808 0.173648 0 0">
+                    <site name="left_center" pos="0 0 0" size="0.01 0.01 0.01" rgba="1 1 0 0" type="sphere" group="1"/>
                     <inertial pos="-0.00316662 -0.0343715 2.42e-06" quat="0.441442 0.459281 0.538276 0.551768"
                       mass="1.26164" diaginertia="0.0043391 0.00432158 0.00223133"/>
                     <joint name="left_arm_0" pos="0 0 0" axis="0 1 0" limited="true" range="-2.35619 2.35619"/>
@@ -342,7 +343,7 @@
                               <geom size="0.075 0.026" pos="0 0 -0.024" class="in-model-collision"/>
                               <body name="link_left_arm_6">
                                 <body name="left_hand" pos="0 0 0" quat="1 0 0 0">
-                                  <site name="left_center" pos="0 0 0" size="0.01 0.01 0.01" rgba="1 1 0 0" type="sphere" group="1"/>
+                                  
                                   <site name="left_ee" pos="0 0 0" size="0.01 0.01 0.01" rgba="0 0 1 1" type="sphere" group="1"/>
                                   <site name="left_ee_x" pos="0 0 0" size="0.005 .1" quat="0.707105 0.707108 0 0" rgba="1 0 0 0" type="cylinder" group="1"/>
                                   <site name="left_ee_y" pos="0 0 0" size="0.005 .1" quat="0.707105 0 0.707108 0" rgba="0 1 0 0" type="cylinder" group="1"/>
