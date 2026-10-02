@@ -87,4 +87,60 @@ pip install -e .
 pip install nerfstudio==1.1.5 scikit-optimize cma sentencepiece peft==0.10.0 transformers==4.36.0 huggingface-hub==0.25.0 numpy==1.23.3
 pip install --upgrade --no-deps timm==1.0.12
 
+# ---- CUDA toolkit for gsplat ----
+# gsplat (used by nerfstudio's splatfacto) JIT-compiles its CUDA kernels on first use,
+# which needs nvcc matching torch's CUDA version. Without it: "gsplat: No CUDA toolkit found".
+setup_gsplat_cuda() {
+  if ! command -v nvidia-smi &> /dev/null; then
+    echo "No NVIDIA GPU detected, skipping CUDA toolkit setup for gsplat"
+    return
+  fi
+  if [[ -z "$CONDA_PREFIX" ]]; then
+    echo "⚠️  No active conda env, skipping CUDA toolkit setup for gsplat"
+    return
+  fi
+
+  # Check torch's CUDA version at the end, since later pip installs may change the torch build
+  TORCH_CUDA=$(python -c "import torch; print(torch.version.cuda or '')")
+  case "$TORCH_CUDA" in
+    11.7) CUDA_LABEL="cuda-11.7.1" ;;
+    11.8) CUDA_LABEL="cuda-11.8.0" ;;
+    12.1) CUDA_LABEL="cuda-12.1.1" ;;
+    *)
+      echo "⚠️  No CUDA toolkit mapping for torch CUDA '$TORCH_CUDA', skipping gsplat setup"
+      return
+      ;;
+  esac
+
+  echo "🧩 Installing CUDA toolkit $CUDA_LABEL for gsplat (torch CUDA $TORCH_CUDA)..."
+  conda install -y -c "nvidia/label/$CUDA_LABEL" cuda-toolkit
+
+  # Conda puts libcudart in lib/, but torch's extension builder links against $CUDA_HOME/lib64
+  export CUDA_HOME="$CONDA_PREFIX"
+  export LIBRARY_PATH="$CONDA_PREFIX/lib"
+
+  # Older nvcc may not support the GPU's architecture (e.g. CUDA 11.7 vs Ada sm_89).
+  # Build for the newest arch <= the GPU's that both nvcc and torch support, plus PTX,
+  # which the driver JIT-compiles for the actual GPU.
+  NVCC_ARCHS=$("$CONDA_PREFIX/bin/nvcc" --list-gpu-arch | grep -oP 'compute_\K[0-9]+' | tr '\n' ' ')
+  export TORCH_CUDA_ARCH_LIST=$(python -c "
+import inspect, re, torch
+from torch.utils import cpp_extension
+gpu = torch.cuda.get_device_capability()
+torch_archs = set(re.findall(r\"'(\d+\.\d+)'\", inspect.getsource(cpp_extension._get_cuda_arch_flags)))
+archs = [(int(a[:-1]), int(a[-1])) for a in '$NVCC_ARCHS'.split()]
+archs = [a for a in archs if a <= gpu and '%d.%d' % a in torch_archs]
+print('%d.%d+PTX' % max(archs))
+")
+
+  # Persist the variables in the conda env (applied on every `conda activate`)
+  conda env config vars set CUDA_HOME="$CUDA_HOME" LIBRARY_PATH="$LIBRARY_PATH" TORCH_CUDA_ARCH_LIST="$TORCH_CUDA_ARCH_LIST"
+
+  echo "🔨 Compiling gsplat CUDA kernels (TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST), this takes a few minutes..."
+  python -c "from gsplat.cuda._backend import _C; assert _C is not None, 'gsplat CUDA build failed'"
+  echo "ℹ️  Re-activate the env to load the new variables: conda deactivate && conda activate ${CONDA_DEFAULT_ENV}"
+}
+
+setup_gsplat_cuda
+
 echo "✅ All done!"
