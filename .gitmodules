@@ -15,3 +15,6 @@
 	path = external/robomimic
 	url = git@github.com:moyucrazy12/mobipi-robomimic.git
     branch = robocasa
+[submodule "external/sphinx"]
+	path = external/sphinx
+	url = git@github.com:david-isfc/sphinx.git
