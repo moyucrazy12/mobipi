@@ -13,5 +13,5 @@
     branch = mobipi
 [submodule "external/robomimic"]
 	path = external/robomimic
-    url = git@github.com:yjy0625/mobipi-robomimic.git
+	url = git@github.com:moyucrazy12/mobipi-robomimic.git
     branch = robocasa
