@@ -61,7 +61,9 @@ REQUIRED_SOURCES=(
     "$SOURCE_DIR/models/assets/bases/rby1_mount.xml"
     "$SOURCE_DIR/models/robots/manipulators/rby1_robot.py"
     "$SOURCE_DIR/models/grippers/rby1_gripper.py"
+    "$SOURCE_DIR/models/assets/grippers/rby1_gripper.xml"
     "$SOURCE_DIR/controllers/config/robots/default_rby1.json"
+    "$SOURCE_DIR/controllers/config/robots/default_rby1_whole_body_ik.json"
 )
 
 for source_file in "${REQUIRED_SOURCES[@]}"; do
@@ -205,6 +207,7 @@ PY
 mkdir -p \
     "$ROBOSUITE_DIR/models/assets/robots/rby1a" \
     "$ROBOSUITE_DIR/models/assets/bases" \
+    "$ROBOSUITE_DIR/models/assets/grippers" \
     "$ROBOSUITE_DIR/models/robots/manipulators" \
     "$ROBOSUITE_DIR/models/grippers" \
     "$ROBOSUITE_DIR/controllers/config/robots"
@@ -217,8 +220,12 @@ install -m 0644 "$SOURCE_DIR/models/robots/manipulators/rby1_robot.py" \
     "$ROBOSUITE_DIR/models/robots/manipulators/rby1_robot.py"
 install -m 0644 "$SOURCE_DIR/models/grippers/rby1_gripper.py" \
     "$ROBOSUITE_DIR/models/grippers/rby1_gripper.py"
+install -m 0644 "$SOURCE_DIR/models/assets/grippers/rby1_gripper.xml" \
+    "$ROBOSUITE_DIR/models/assets/grippers/rby1_gripper.xml"
 install -m 0644 "$SOURCE_DIR/controllers/config/robots/default_rby1.json" \
     "$ROBOSUITE_DIR/controllers/config/robots/default_rby1.json"
+install -m 0644 "$SOURCE_DIR/controllers/config/robots/default_rby1_whole_body_ik.json" \
+    "$ROBOSUITE_DIR/controllers/config/robots/default_rby1_whole_body_ik.json"
 
 echo "RB-Y1 files installed into: $ROBOSUITE_DIR"
 echo "Original patched files have a one-time .pre-rby1 backup beside them."

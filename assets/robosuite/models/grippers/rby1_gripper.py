@@ -1,13 +1,14 @@
 import numpy as np
 
-from robosuite.models.grippers.null_gripper import NullGripper
+from robosuite.models.grippers.gripper_model import GripperModel
+from robosuite.utils.mjcf_utils import xml_path_completion
 
 
-class RBY1Gripper(NullGripper):
+class RBY1Gripper(GripperModel):
     """Logical gripper adapter for the finger actuators embedded in RBY1a."""
 
     def __init__(self, idn=0):
-        super().__init__(idn=idn)
+        super().__init__(xml_path_completion("grippers/rby1_gripper.xml"), idn=idn)
         self.arm = str(idn).rsplit("_", 1)[-1]
         self.robot_id = str(idn).split("_", 1)[0]
 
