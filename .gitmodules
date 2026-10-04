@@ -18,3 +18,4 @@
 [submodule "external/sphinx"]
 	path = external/sphinx
 	url = git@github.com:david-isfc/sphinx.git
+	branch = main
