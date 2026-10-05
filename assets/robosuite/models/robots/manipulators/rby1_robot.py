@@ -20,8 +20,10 @@ class RBY1Mount(MountModel):
 
     @property
     def horizontal_radius(self):
-        # Used by RoboCasa to keep the complete mobile base clear of fixtures.
-        return 0.6
+        # Farthest chassis/wheel collision vertex from the base origin in the xy
+        # plane (0.434 m, at the outer wheel edges); the footprint spans
+        # x [-0.335, 0.328], y [-0.29, 0.29].
+        return 0.44
 
 
 class RBY1(ManipulatorModel):
