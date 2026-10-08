@@ -20,8 +20,10 @@ class RBY1Mount(MountModel):
 
     @property
     def horizontal_radius(self):
-        # Used by RoboCasa to keep the complete mobile base clear of fixtures.
-        return 0.6
+        # Farthest chassis/wheel collision vertex from the base origin in the xy
+        # plane (0.434 m, at the outer wheel edges); the footprint spans
+        # x [-0.335, 0.328], y [-0.29, 0.29].
+        return 0.44
 
 
 class RBY1(ManipulatorModel):
@@ -39,6 +41,24 @@ class RBY1(ManipulatorModel):
         # Ensure you put your rby1.xml in the robosuite/models/assets/robots/rby1/ directory
         super().__init__(xml_path_completion("robots/rby1a/rby1a_1.2.xml"), idn=idn)
         self._convert_torque_controlled_actuators()
+        self._set_base_joint_dynamics()
+
+    def _set_base_joint_dynamics(self):
+        """Override robosuite's arm-style joint defaults on the chassis and wheels.
+
+        RobotModel assigns armature 5 / (i + 1) by joint order, which puts 5 on
+        every free-joint DOF and unequal values on the two wheels (yaw drift).
+        The wheels act as velocity servos (a damper of gain kv), which the Euler
+        integrator only keeps stable if inertia > kv * timestep / 2, so they get
+        a symmetric armature (motor reflected inertia) with margin for kv=150.
+        """
+        for joint in self._elements["joints"]:
+            raw_name = joint.get("name", "").removeprefix(f"robot{self.idn}_")
+            if raw_name == "world_j":
+                for attribute in ("armature", "damping", "frictionloss"):
+                    joint.set(attribute, "0")
+            elif raw_name in {"left_wheel", "right_wheel"}:
+                joint.set("armature", "0.5")
 
     @property
     def joints(self):

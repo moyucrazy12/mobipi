@@ -18,7 +18,9 @@ class SceneModel:
         self.ckpt_dir = ckpt_dir
 
         config_path = os.path.join(ckpt_dir, "config.yml")
-        config, pipeline, checkpoint_path, step = eval_setup(Path(config_path))
+        config, pipeline, checkpoint_path, step = eval_setup(
+            Path(config_path), update_config_callback=self._relocate_config
+        )
         pipeline.train()
         self.model = pipeline.model
         self.model.training = False
@@ -29,6 +31,17 @@ class SceneModel:
         self.data_transforms = dataparser_transforms
 
         self.camera_intrinsics = camera_intrinsics
+
+    def _relocate_config(self, config):
+        # Downloaded checkpoints store absolute paths from the machine they were
+        # trained on; point them at the scene folder the checkpoint was loaded from,
+        # i.e. [scene_dir]/model/[method]/[timestamp].
+        run_dir = Path(self.ckpt_dir).resolve()
+        scene_dir = run_dir.parents[2]
+        config.output_dir = run_dir.parents[1]
+        config.data = scene_dir
+        config.pipeline.datamanager.data = scene_dir
+        return config
 
     def render(self, extrinsics, image_size=128):
         device = extrinsics.device
