@@ -2,9 +2,10 @@ import numpy as np
 
 # We inherit from ManipulatorModel as done in baxter_robot.py
 from robosuite.models.robots.manipulators.manipulator_model import ManipulatorModel
+from robosuite.models.bases.mobile_base_model import MobileBaseModel
 from robosuite.models.bases.mount_model import MountModel
 from robosuite.models.bases import register_base
-from robosuite.utils.mjcf_utils import xml_path_completion
+from robosuite.utils.mjcf_utils import array_to_string, find_elements, xml_path_completion
 
 
 @register_base
@@ -26,6 +27,34 @@ class RBY1Mount(MountModel):
         return 0.44
 
 
+@register_base
+class RBY1MobileBase(MobileBaseModel):
+    """
+    Planar virtual base, like robosuite's NullMobileBase used by Tiago: forward /
+    side slide joints and a yaw hinge about the wheel axle midpoint, all velocity
+    controlled. The wheels are not simulated.
+    """
+
+    def __init__(self, idn=0):
+        super().__init__(xml_path_completion("bases/rby1_mobile_base.xml"), idn=idn)
+
+    @property
+    def top_offset(self):
+        return np.zeros(3)
+
+    @property
+    def horizontal_radius(self):
+        # Same footprint as RBY1Mount
+        return 0.44
+
+
+WHEEL_JOINTS = {"left_wheel", "right_wheel"}
+WHEEL_ACTUATORS = {"left_wheel_act", "right_wheel_act"}
+# On a mobile base the robot is lifted so the wheels clear the floor: with no
+# vertical DOF, a wheel touching the floor while sliding is a hard friction contact.
+MOBILE_BASE_CLEARANCE = 0.003
+
+
 class RBY1(ManipulatorModel):
     """
     RBY-1 is a bimanual mobile manipulator.
@@ -41,30 +70,26 @@ class RBY1(ManipulatorModel):
         # Ensure you put your rby1.xml in the robosuite/models/assets/robots/rby1/ directory
         super().__init__(xml_path_completion("robots/rby1a/rby1a_1.2.xml"), idn=idn)
         self._convert_torque_controlled_actuators()
-        self._set_base_joint_dynamics()
 
-    def _set_base_joint_dynamics(self):
-        """Override robosuite's arm-style joint defaults on the chassis and wheels.
+    def add_mobile_base(self, mobile_base):
+        """Attach a virtual mobile base, which replaces the wheel actuators.
 
-        RobotModel assigns armature 5 / (i + 1) by joint order, which puts 5 on
-        every free-joint DOF and unequal values on the two wheels (yaw drift).
-        The wheels act as velocity servos (a damper of gain kv), which the Euler
-        integrator only keeps stable if inertia > kv * timestep / 2, so they get
-        a symmetric armature (motor reflected inertia) with margin for kv=150.
+        The wheel joints stay as passive hinges, so the robot keeps the joint
+        layout of the fixed-base (RBY1Mount) model the demos were recorded with.
         """
-        for joint in self._elements["joints"]:
-            raw_name = joint.get("name", "").removeprefix(f"robot{self.idn}_")
-            if raw_name == "world_j":
-                for attribute in ("armature", "damping", "frictionloss"):
-                    joint.set(attribute, "0")
-            elif raw_name in {"left_wheel", "right_wheel"}:
-                joint.set("armature", "0.5")
-
-    @property
-    def joints(self):
-        """Return scalar-actuated joints, excluding the free chassis joint."""
-        free_joint = f"robot{self.idn}_world_j"
-        return [joint for joint in super().joints if joint != free_joint]
+        for actuator in list(self._elements["actuators"]):
+            if actuator.get("name", "").removeprefix(f"robot{self.idn}_") in WHEEL_ACTUATORS:
+                self.actuator.remove(actuator)
+                self._elements["actuators"].remove(actuator)
+        self._actuators = [
+            name for name in self._actuators
+            if name.removeprefix(f"robot{self.idn}_") not in WHEEL_ACTUATORS
+        ]
+        super().add_mobile_base(mobile_base)
+        chassis = find_elements(
+            root=self.worldbody, tags="body", attribs={"name": self.naming_prefix + "chassis"}, return_first=True
+        )
+        chassis.set("pos", array_to_string(np.array([0.0, 0.0, MOBILE_BASE_CLEARANCE])))
 
     def _convert_torque_controlled_actuators(self):
         """Convert arm, torso, and head position targets to torque actuators.
@@ -95,9 +120,13 @@ class RBY1(ManipulatorModel):
         self._legs_joints = []
         self._arms_joints = []
 
+        mobile = isinstance(self.base, MobileBaseModel)
         for joint in self.all_joints:
             raw_name = joint.removeprefix(f"robot{self.idn}_")
-            if raw_name in {"left_wheel", "right_wheel"}:
+            if raw_name in WHEEL_JOINTS:
+                if not mobile:
+                    self._base_joints.append(joint)
+            elif mobile and joint in self.base.joints:
                 self._base_joints.append(joint)
             elif raw_name.startswith("torso_"):
                 self._torso_joints.append(joint)
@@ -114,9 +143,10 @@ class RBY1(ManipulatorModel):
         self._legs_actuators = []
         self._arms_actuators = []
 
+        mobile = isinstance(self.base, MobileBaseModel)
         for actuator in self.all_actuators:
             raw_name = actuator.removeprefix(f"robot{self.idn}_")
-            if raw_name in {"left_wheel_act", "right_wheel_act"}:
+            if raw_name in WHEEL_ACTUATORS or (mobile and actuator in self.base.actuators):
                 self._base_actuators.append(actuator)
             elif raw_name.startswith("link") and raw_name.endswith("_act"):
                 self._torso_actuators.append(actuator)
@@ -127,8 +157,9 @@ class RBY1(ManipulatorModel):
 
     @property
     def default_base(self):
-        # The MJCF already contains the robot's mobile base and wheel joints.
-        return "RBY1Mount"
+        # Mobile like Tiago / PandaOmron. Use base_types="RBY1Mount" for the
+        # fixed-base robot that the recorded demos and saved models use.
+        return "RBY1MobileBase"
 
     @property
     def default_gripper(self):

@@ -70,6 +70,9 @@ def load_dataset_info(dataset_path):
 
 def make_env(env_args, layout_id, style_id):
     env_kwargs = dict(env_args["env_kwargs"])
+    # Demos may be recorded on the fixed RBY1Mount; mobilization needs the
+    # robot's default mobile base.
+    env_kwargs.pop("base_types", None)
     dataset_layouts = env_kwargs.pop("layout_ids", None) or []
     env_kwargs.pop("style_ids", None)
     if layout_id not in dataset_layouts:
@@ -94,11 +97,19 @@ def make_env(env_args, layout_id, style_id):
 
 
 def gripper_action_from_dataset(env, first_action):
+    """
+    Gripper commands of a dataset action. Demos recorded on the fixed RBY1Mount
+    have a 2-D (wheel) base action instead of the mobile base's 3-D one, so
+    parts after the base are shifted accordingly.
+    """
     split = env.robots[0].composite_controller._whole_body_controller_action_split_indexes
-    return {
-        part: first_action[start:end]
-        for part, (start, end) in split.items() if part.endswith("gripper")
-    }
+    shift, gripper_action = 0, {}
+    for part, (start, end) in split.items():
+        if part == "base":
+            shift = len(first_action) - env.action_dim
+        elif part.endswith("gripper"):
+            gripper_action[part] = first_action[start + shift:end + shift]
+    return gripper_action
 
 
 def get_topdown_image(env, bounds, image_size=1024):
@@ -140,7 +151,7 @@ def pose_error(a, b):
 @click.option("--base_estimator", default="ET")
 @click.option("--pos_threshold", default=0.3, type=float, help="Max distance (m) to the demo start pose to count as success.")
 @click.option("--heading_threshold", default=0.35, type=float, help="Max heading error (rad) to the demo start pose to count as success.")
-@click.option("--nav_mode", default="wheels", type=click.Choice(["wheels", "kinematic"]), help="Drive the wheels, or move the chassis along the plan directly.")
+@click.option("--nav_mode", default="velocity", type=click.Choice(["velocity", "kinematic"]), help="Drive the base with velocity commands, or move it along the plan directly.")
 @click.option("--vis", is_flag=True)
 def main(
     dataset,

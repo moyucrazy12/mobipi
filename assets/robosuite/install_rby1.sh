@@ -59,6 +59,7 @@ PY
 REQUIRED_SOURCES=(
     "$SOURCE_DIR/models/assets/robots/rby1a/rby1a_1.2.xml"
     "$SOURCE_DIR/models/assets/bases/rby1_mount.xml"
+    "$SOURCE_DIR/models/assets/bases/rby1_mobile_base.xml"
     "$SOURCE_DIR/models/robots/manipulators/rby1_robot.py"
     "$SOURCE_DIR/models/grippers/rby1_gripper.py"
     "$SOURCE_DIR/models/assets/grippers/rby1_gripper.xml"
@@ -216,6 +217,8 @@ cp -a "$SOURCE_DIR/models/assets/robots/rby1a/." \
     "$ROBOSUITE_DIR/models/assets/robots/rby1a/"
 install -m 0644 "$SOURCE_DIR/models/assets/bases/rby1_mount.xml" \
     "$ROBOSUITE_DIR/models/assets/bases/rby1_mount.xml"
+install -m 0644 "$SOURCE_DIR/models/assets/bases/rby1_mobile_base.xml" \
+    "$ROBOSUITE_DIR/models/assets/bases/rby1_mobile_base.xml"
 install -m 0644 "$SOURCE_DIR/models/robots/manipulators/rby1_robot.py" \
     "$ROBOSUITE_DIR/models/robots/manipulators/rby1_robot.py"
 install -m 0644 "$SOURCE_DIR/models/grippers/rby1_gripper.py" \
