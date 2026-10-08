@@ -1,11 +1,13 @@
 """
 RB-Y1 specific helpers for the Mobi-pi mobilization pipeline.
 
-The original Mobi-pi utilities assume a RoboCasa mobile base with
-`mobilebase0_*` slide/hinge joints and a 12-D action. The RB-Y1 model instead
-has a free-joint chassis (`robot0_world_j`) driven by two wheels and uses a
-WHOLE_BODY_IK composite controller, so base pose access, camera extrinsics,
-initial nav placement, and navigation are re-implemented here.
+Like Tiago and PandaOmron, the RB-Y1 moves on a virtual base
+(`RBY1MobileBase`): `mobilebase0_*` forward/side slide joints and a yaw hinge
+about the wheel axle midpoint, driven by the stock JOINT_VELOCITY base
+controller. The original Mobi-pi utilities assume PandaOmron's 12-D action and
+base frame conventions, while the RB-Y1 uses a WHOLE_BODY_IK composite
+controller, so base pose access, camera extrinsics, initial nav placement, and
+navigation are re-implemented here.
 """
 import math
 import numpy as np
@@ -17,38 +19,57 @@ from mobipi.utils import nav_utils
 from mobipi.utils.nav_utils import angle_wrap, check_path_collision, rrt_planner
 
 
-BASE_BODY = "robot0_base"
-FREE_JOINT = "robot0_world_j"
+ROOT_BODY = "robot0_base"  # stays at the env's robot placement; the base joints move the robot relative to it
+BASE_SITE = "mobilebase0_center"  # base origin, moves with the base joints
+FORWARD_JOINT = "mobilebase0_joint_mobile_forward"
+SIDE_JOINT = "mobilebase0_joint_mobile_side"
+YAW_JOINT = "mobilebase0_joint_mobile_yaw"
 ROBOT_GEOM_PREFIXES = ("robot0_", "gripper0_")
 
 # Same per-step limits as `nav_utils.move_to_pose` at 20 Hz control
 MAX_DIST_PER_STEP = 0.5 / 20
 MAX_ROT_PER_STEP = 1.0 / 20
 
-# Wheel-driven navigation: speed limits (the wheels top out at ~0.31 m/s),
+# Closed-loop base navigation: speed limits (same as `nav_utils.move_to_pose`),
 # P gains, and arrival tolerances
-WHEEL_V_MAX = 0.25
-WHEEL_W_MAX = 0.8
-WHEEL_K_V = 1.5
-WHEEL_K_W = 3.0
-WHEEL_POS_TOL = 0.02
-WHEEL_HEADING_TOL = 0.01
+BASE_V_MAX = 0.5
+BASE_W_MAX = 1.0
+BASE_K_V = 1.5
+BASE_K_W = 3.0
+BASE_POS_TOL = 0.02
+BASE_HEADING_TOL = 0.01
 
 
 def get_base_vec(sim):
-    """Returns the chassis pose as [x, y, yaw]."""
-    qpos = sim.data.get_joint_qpos(FREE_JOINT)
-    yaw = T.mat2euler(T.quat2mat(qpos[[4, 5, 6, 3]]))[2]
-    return np.array([qpos[0], qpos[1], yaw])
+    """Returns the base pose as [x, y, yaw]."""
+    pos = sim.data.get_site_xpos(BASE_SITE)
+    yaw = T.mat2euler(sim.data.get_site_xmat(BASE_SITE))[2]
+    return np.array([pos[0], pos[1], yaw])
 
 
 def set_base_vec(sim, base_vec):
-    """Teleports the chassis to [x, y, yaw], keeping its height."""
-    qpos = sim.data.get_joint_qpos(FREE_JOINT).copy()
-    qpos[0], qpos[1] = base_vec[0], base_vec[1]
-    qpos[3:7] = [np.cos(base_vec[2] / 2), 0.0, 0.0, np.sin(base_vec[2] / 2)]
-    sim.data.set_joint_qpos(FREE_JOINT, qpos)
-    sim.data.set_joint_qvel(FREE_JOINT, np.zeros(6))
+    """
+    Teleports the base to [x, y, yaw] by setting the base joints.
+
+    The slide joints translate the base in the root body frame, then the yaw
+    hinge rotates it about its anchor `a`, so the base origin ends up at
+    root + R_root (s + a - R_z(q_yaw) a).
+    """
+    model = sim.model
+    root_pos = sim.data.get_body_xpos(ROOT_BODY)
+    root_yaw = T.mat2euler(sim.data.get_body_xmat(ROOT_BODY))[2]
+    q_yaw = angle_wrap(base_vec[2] - root_yaw)
+    anchor = model.jnt_pos[model.joint_name2id(YAW_JOINT)][:2]
+    rot_root = np.array([[np.cos(root_yaw), -np.sin(root_yaw)], [np.sin(root_yaw), np.cos(root_yaw)]])
+    rot_yaw = np.array([[np.cos(q_yaw), -np.sin(q_yaw)], [np.sin(q_yaw), np.cos(q_yaw)]])
+    slide = rot_root.T @ (np.asarray(base_vec[:2]) - root_pos[:2]) - anchor + rot_yaw @ anchor
+    for joint, value in [
+        (FORWARD_JOINT, slide @ model.jnt_axis[model.joint_name2id(FORWARD_JOINT)][:2]),
+        (SIDE_JOINT, slide @ model.jnt_axis[model.joint_name2id(SIDE_JOINT)][:2]),
+        (YAW_JOINT, q_yaw),
+    ]:
+        sim.data.set_joint_qpos(joint, value)
+        sim.data.set_joint_qvel(joint, 0.0)
     sim.forward()
 
 
@@ -154,7 +175,7 @@ def sample_nav_init_pose(env, base_fixture_bounds_2d, floor_fixture_bounds_2d,
 def hold_action(env, gripper_action=None):
     """
     Builds a WHOLE_BODY_IK action that holds the current arm/torso/head
-    configuration with zero wheel velocity.
+    configuration with zero base velocity.
     """
     robot = env.robots[0]
     controller = robot.composite_controller
@@ -217,8 +238,18 @@ def _diff_drive_poses(start, goal_xy, final_heading=None):
     return poses
 
 
-class _WheelDriver:
-    """Closed-loop differential-drive control of the RB-Y1 wheels."""
+class _BaseDriver:
+    """
+    Closed-loop unicycle control (no lateral motion, as for the real
+    differential-drive robot) through the JOINT_VELOCITY base controller.
+
+    The controller takes [forward, lateral, yaw] velocity in the robot frame,
+    scaled to [-1, 1] by the actuator ranges, and rotates the translation into
+    the root frame of the slide joints. Each joint's velocity servo loses
+    frictionloss / kv to dry friction, so the root-frame velocity of every joint
+    is compensated separately; compensating in the robot frame would bend the
+    direction of motion whenever the heading differs from the root's.
+    """
 
     def __init__(self, env, gripper_action, reset_joint_qpos, step_callback):
         self.env = env
@@ -232,20 +263,23 @@ class _WheelDriver:
         robot = env.robots[0]
         controller = robot.composite_controller
         self.base_slice = slice(*controller._whole_body_controller_action_split_indexes["base"])
-        # The base action is written to the actuators in `base_actuators` order,
-        # which differs from the base controller's joint order on RB-Y1.
-        act_ids = robot._ref_actuators_indexes_dict[robot.base]
-        self.base_joints = [model.joint_id2name(model.actuator_trnid[a, 0]) for a in act_ids]
-        wheel_pos = {
-            j: model.body_pos[model.jnt_bodyid[model.joint_name2id(j)]] for j in self.base_joints
-        }
-        right = next(j for j in self.base_joints if "right" in j)
-        left = next(j for j in self.base_joints if "left" in j)
-        self.radius = float(wheel_pos[right][2])
-        self.track = float(abs(wheel_pos[left][1] - wheel_pos[right][1]))
-        # the robot turns in place about the axle midpoint, which is ahead of the base origin
-        self.axle_offset = float(wheel_pos[right][0])
-        self.max_wheel_speed = float(np.min(model.actuator_ctrlrange[act_ids][:, 1]))
+        self.base_controller = controller.part_controllers["base"]
+        # Velocity limits and dry-friction velocity offsets of the slide joints
+        # along the root x / y axes and of the yaw joint
+        limits, friction = [], []
+        for joint in (SIDE_JOINT, FORWARD_JOINT, YAW_JOINT):
+            joint_id = model.joint_name2id(joint)
+            act_id = next(a for a in range(model.nu) if model.actuator_trnid[a, 0] == joint_id)
+            limits.append(model.actuator_ctrlrange[act_id, 1])
+            friction.append(model.dof_frictionloss[model.jnt_dofadr[joint_id]] / model.actuator_gainprm[act_id, 0])
+        assert np.allclose(model.jnt_axis[model.joint_name2id(SIDE_JOINT)], [1, 0, 0])
+        assert np.allclose(model.jnt_axis[model.joint_name2id(FORWARD_JOINT)], [0, 1, 0])
+        # the controller rotates the translation before scaling it per joint
+        assert np.isclose(limits[0], limits[1]), limits
+        self.v_limit, self.w_limit = limits[0], limits[2]
+        self.xy_friction, self.w_friction = np.array(friction[:2]), friction[2]
+        # the robot turns in place about the yaw joint anchor (the axle midpoint)
+        self.axle_offset = float(model.jnt_pos[model.joint_name2id(YAW_JOINT)][0])
 
     def axle_xy(self, base_vec):
         """Axle midpoint for a base pose [x, y, yaw]."""
@@ -261,7 +295,7 @@ class _WheelDriver:
         """Turns toward `goal_xy` (axle midpoint), drives there, then optionally turns in place."""
         x, y, th = self.pose()
         delta = np.asarray(goal_xy) - np.array([x, y])
-        if np.linalg.norm(delta) > WHEEL_POS_TOL:
+        if np.linalg.norm(delta) > BASE_POS_TOL:
             heading = math.atan2(delta[1], delta[0])
             if abs(angle_wrap(heading - th)) > np.pi / 2:
                 heading = angle_wrap(heading + np.pi)
@@ -270,15 +304,23 @@ class _WheelDriver:
         if final_heading is not None:
             self.rotate_to(final_heading)
 
+    @staticmethod
+    def _compensate(value, friction):
+        """Servo velocity target that realizes `value` despite the joint's dry friction."""
+        return np.where(np.abs(value) < 1e-6, 0.0, value + np.sign(value) * friction)
+
     def step(self, v, w):
         """Applies body velocity (v [m/s], w [rad/s]) for one control step."""
-        wheel = {}
-        for j in self.base_joints:
-            side = 1.0 if "right" in j else -1.0
-            wheel[j] = (v + side * w * self.track / 2) / self.radius
-        scale = max(1.0, max(abs(x) for x in wheel.values()) / self.max_wheel_speed)
+        # heading relative to the root frame, as the controller computes it
+        theta = get_base_vec(self.sim)[2] - T.mat2euler(self.base_controller.init_ori)[2]
+        c, s = np.cos(theta), np.sin(theta)
+        u_x, u_y = self._compensate(v * np.array([c, s]), self.xy_friction)
         action = hold_action(self.env, self.gripper_action)
-        action[self.base_slice] = [wheel[j] / scale / self.max_wheel_speed for j in self.base_joints]
+        action[self.base_slice] = np.clip([
+            (u_x * c + u_y * s) / self.v_limit,
+            (-u_x * s + u_y * c) / self.v_limit,
+            self._compensate(w, self.w_friction) / self.w_limit,
+        ], -1.0, 1.0)
         self.env.step(action)
         set_robot_joint_qpos(self.env, self.reset_joint_qpos)
         self.sim.forward()
@@ -290,11 +332,11 @@ class _WheelDriver:
 
     def rotate_to(self, heading):
         err0 = angle_wrap(heading - self.pose()[2])
-        for _ in range(self._timeout(err0, WHEEL_W_MAX)):
+        for _ in range(self._timeout(err0, BASE_W_MAX)):
             err = angle_wrap(heading - self.pose()[2])
-            if abs(err) < WHEEL_HEADING_TOL:
+            if abs(err) < BASE_HEADING_TOL:
                 break
-            self.step(0.0, float(np.clip(WHEEL_K_W * err, -WHEEL_W_MAX, WHEEL_W_MAX)))
+            self.step(0.0, float(np.clip(BASE_K_W * err, -BASE_W_MAX, BASE_W_MAX)))
         else:
             self.stuck = True
 
@@ -304,18 +346,18 @@ class _WheelDriver:
         delta = np.asarray(goal_xy) - np.array([x, y])
         direction = 1.0 if np.dot(delta, [np.cos(th), np.sin(th)]) >= 0 else -1.0
         best_dist, no_progress = np.inf, 0
-        for _ in range(self._timeout(np.linalg.norm(delta), WHEEL_V_MAX)):
+        for _ in range(self._timeout(np.linalg.norm(delta), BASE_V_MAX)):
             x, y, th = self.pose()
             delta = np.asarray(goal_xy) - np.array([x, y])
             dist = np.linalg.norm(delta)
             along = direction * np.dot(delta, [np.cos(th), np.sin(th)])
-            if dist < WHEEL_POS_TOL or along <= 0:
+            if dist < BASE_POS_TOL or along <= 0:
                 break
-            v = direction * min(WHEEL_K_V * along, WHEEL_V_MAX)
+            v = direction * min(BASE_K_V * along, BASE_V_MAX)
             w = 0.0
             if dist > 0.1:  # steering near the goal makes the robot circle it
                 ref = math.atan2(delta[1], delta[0]) + (0 if direction > 0 else np.pi)
-                w = float(np.clip(WHEEL_K_W * angle_wrap(ref - th), -WHEEL_W_MAX, WHEEL_W_MAX))
+                w = float(np.clip(BASE_K_W * angle_wrap(ref - th), -BASE_W_MAX, BASE_W_MAX))
             self.step(v, w)
             if dist < best_dist - 1e-3:
                 best_dist, no_progress = dist, 0
@@ -330,20 +372,20 @@ class _WheelDriver:
 
 def move_to_pose(env, target_vec, k_col, floor_fixture_bounds_2d,
                  render_camera="robot0_head_camera", render_size=256,
-                 settle_steps=20, gripper_action=None, use_rrt=True, mode="wheels"):
+                 settle_steps=20, gripper_action=None, use_rrt=True, mode="velocity"):
     """
     Navigates the RB-Y1 base to `target_vec` = [x, y, yaw].
 
     Plans like `nav_utils.move_to_pose` (straight line, RRT if blocked) and
     executes the plan as differential-drive maneuvers (rotate, drive straight,
-    rotate; no lateral motion). With `mode="wheels"` the maneuvers are tracked
-    in closed loop through wheel velocity commands. With `mode="kinematic"` the
-    chassis is moved along the plan directly at `nav_utils.move_to_pose`'s
-    speed limits, ignoring wheel dynamics. Penetrating robot-environment
+    rotate; no lateral motion). With `mode="velocity"` the maneuvers are tracked
+    in closed loop through base velocity commands. With `mode="kinematic"` the
+    base is moved along the plan directly at `nav_utils.move_to_pose`'s
+    speed limits, ignoring base dynamics. Penetrating robot-environment
     contacts are recorded at every step. After arrival the sim is stepped with
     a hold action to check the final pose is stable.
     """
-    assert mode in ("wheels", "kinematic"), mode
+    assert mode in ("velocity", "kinematic"), mode
     sim = env.sim
     target_vec = np.asarray(target_vec, dtype=float)
     init_vec = get_base_vec(sim)
@@ -389,13 +431,13 @@ def move_to_pose(env, target_vec, k_col, floor_fixture_bounds_2d,
                 record_step()
                 curr = pose
     else:
-        driver = _WheelDriver(env, gripper_action, reset_joint_qpos, record_step)
+        driver = _BaseDriver(env, gripper_action, reset_joint_qpos, record_step)
         target_axle = driver.axle_xy(target_vec)
         for wp in waypoints[1:-1]:
             driver.go_to(wp[:2])
         driver.go_to(target_axle, final_heading=target_vec[2])
         # correct a residual offset once (turn toward it, drive, turn back)
-        if np.linalg.norm(driver.pose()[:2] - target_axle) > 2 * WHEEL_POS_TOL:
+        if np.linalg.norm(driver.pose()[:2] - target_axle) > 2 * BASE_POS_TOL:
             driver.go_to(target_axle, final_heading=target_vec[2])
         stuck = driver.stuck
     num_steps = len(base_vec_history) - 1
