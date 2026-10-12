@@ -14,8 +14,11 @@ dataset_states_to_obs.py and the RB-Y1 diffusion policy pipeline read:
         actions_abs       (T, action_dim) same as actions: they are already absolute
       ...
 
-env_args recreates the collector's environment (CloseDrawerLeft, RB-Y1, the same
-controller), with layout_ids / style_ids covering all gathered demos. Train /
+env_args recreates the collector's environment from the env_kwargs.json that
+auto_close_drawer.py saves with each recording (same controller, base noise and
+drawer opening range; all demos must agree), with layout_ids / style_ids
+covering all gathered demos. Recordings without env_kwargs.json (older batches)
+get the default collection settings. Train /
 validation masks are not written; add them with robomimic's split_train_val.py.
 
 Example:
@@ -68,8 +71,26 @@ def episode_dirs(input_dir):
         yield eps[0], row
 
 
-def env_args(env_name, controller, control_freq, layouts, styles):
+# Per-episode or on-screen settings, not part of the environment definition
+EPISODE_KWARGS = ("env_name", "layout_ids", "style_ids", "seed", "has_renderer", "has_offscreen_renderer",
+                  "render_camera", "renderer", "use_camera_obs")
+
+
+def recorded_env_kwargs(demo_dir):
+    """Environment kwargs saved by auto_close_drawer.py, without the per-episode ones (None if absent)."""
+    path = demo_dir / "env_kwargs.json"
+    if not path.exists():
+        return None
+    kwargs = json.loads(path.read_text())
+    return {k: v for k, v in kwargs.items() if k not in EPISODE_KWARGS}
+
+
+def env_args(env_name, recorded, controller, control_freq, layouts, styles):
     """robomimic env metadata for the environment auto_close_drawer.py records in."""
+    if recorded is not None:
+        env_kwargs = dict(recorded, layout_ids=layouts, style_ids=styles, has_renderer=False,
+                          has_offscreen_renderer=False, use_camera_obs=False)
+        return dict(env_name=env_name, env_version=robosuite.__version__, type=ROBOSUITE_ENV_TYPE, env_kwargs=env_kwargs)
     env_kwargs = {
         "robots": "RBY1",
         "controller_configs": load_composite_controller_config(controller=controller, robot="RBY1"),
@@ -92,7 +113,7 @@ def main():
     parser.add_argument("--input", nargs="+", required=True, help="Batch output directories (with manifest.csv)")
     parser.add_argument("--output", required=True, help="HDF5 file to write")
     parser.add_argument("--environment", default="CloseDrawerLeft")
-    parser.add_argument("--controller", default=DEFAULT_CONTROLLER, help="Controller JSON the demos were collected with")
+    parser.add_argument("--controller", default=DEFAULT_CONTROLLER, help="Controller JSON the demos were collected with (only used without env_kwargs.json)")
     parser.add_argument("--control-freq", type=int, default=20)
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
@@ -103,6 +124,7 @@ def main():
     output.parent.mkdir(parents=True, exist_ok=True)
 
     layouts, styles, total, num_demos = set(), set(), 0, 0
+    recorded, recorded_from = None, None
     with h5py.File(output, "w") as f:
         data = f.create_group("data")
         for input_dir in args.input:
@@ -113,6 +135,12 @@ def main():
                     raise RuntimeError(f"{ep_dir}: recorded in {env_names}, expected {args.environment}")
                 if not successful:
                     raise RuntimeError(f"{ep_dir}: listed in the manifest but not marked successful")
+                kwargs = recorded_env_kwargs(ep_dir.parent)
+                if num_demos == 0:
+                    recorded, recorded_from = kwargs, ep_dir.parent
+                elif kwargs != recorded:
+                    raise RuntimeError(f"{ep_dir.parent} was collected with different environment settings "
+                                       f"than {recorded_from}; gather them into separate datasets")
                 ep_meta = json.loads((ep_dir / "ep_meta.json").read_text())
                 layouts.add(int(ep_meta["layout_id"]))
                 styles.add(int(ep_meta["style_id"]))
@@ -132,8 +160,10 @@ def main():
 
         if num_demos == 0:
             raise RuntimeError("No demos found")
+        if recorded is None:
+            print("\nNo env_kwargs.json in the recordings; using the default collection settings")
         data.attrs["env_args"] = json.dumps(env_args(
-            args.environment, args.controller, args.control_freq, sorted(layouts), sorted(styles)), indent=4)
+            args.environment, recorded, args.controller, args.control_freq, sorted(layouts), sorted(styles)), indent=4)
         data.attrs["total"] = total
         data.attrs["date"] = datetime.datetime.now().isoformat(timespec="seconds")
 

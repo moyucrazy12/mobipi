@@ -7,11 +7,15 @@ drawer (mobipi.envs.CloseDrawerLeft), squatting with the head turned toward
 the drawer (the env resets into rby1_utils.TORSO_POSES / HEAD_POSES). The left
 gripper approaches the drawer front near the edge closest to the robot, finds
 contact, and pushes along the drawer's slide axis until the task succeeds.
+--base-pos-noise / --base-yaw-noise and --drawer-open-min / -max randomize the
+robot placement and the initial drawer opening. With --record-dir the
+environment kwargs are saved to env_kwargs.json next to the recording.
 
 Exit codes: 0 success, 2 failure, 3 scene skipped (no left placement, or the
 start pose collides with a fixture).
 """
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -86,14 +90,20 @@ def run(args):
         "initialization_noise": None,
         "randomize_cameras": False,
         "seed": args.seed,
+        "drawer_open_range": [args.drawer_open_min, args.drawer_open_max],
     }
+    if args.base_pos_noise > 0 or args.base_yaw_noise > 0:
+        config["randomize_base_init_pose"] = [args.base_pos_noise, args.base_pos_noise, np.deg2rad(args.base_yaw_noise)]
     np.random.seed(args.seed)
-    # CloseDrawerLeft raises when there is no room to the right of the drawer,
-    # both while loading the model in make() and on reset()
+    # CloseDrawerLeft raises when no sampled scene has room to the right of the
+    # drawer, both while loading the model in make() and on reset()
     try:
         env = robosuite.make(**config)
         if args.record_dir:
             os.makedirs(args.record_dir, exist_ok=True)
+            # gather_demos_hdf5.py recreates the environment from these
+            with open(os.path.join(args.record_dir, "env_kwargs.json"), "w") as f:
+                json.dump(config, f, indent=4)
             env = DataCollectionWrapper(env, args.record_dir)
             print("Recording raw trajectory to:", args.record_dir)
         env.reset()
@@ -233,6 +243,10 @@ if __name__ == "__main__":
     parser.add_argument("--style", type=int, default=0)
     parser.add_argument("--seed", type=int, default=0, help="RoboCasa / NumPy episode seed")
     parser.add_argument("--control-freq", type=int, default=20)
+    parser.add_argument("--base-pos-noise", type=float, default=0.0, help="Std of the robot base x / y placement noise [m]")
+    parser.add_argument("--base-yaw-noise", type=float, default=0.0, help="Std of the robot base yaw placement noise [deg]")
+    parser.add_argument("--drawer-open-min", type=float, default=0.9, help="Min initial drawer opening (fraction of fully open)")
+    parser.add_argument("--drawer-open-max", type=float, default=1.0, help="Max initial drawer opening (fraction of fully open)")
     parser.add_argument("--push-edge-inset", type=float, default=0.10, help="Push point distance from the drawer's robot-side edge [m]")
     parser.add_argument("--contact-z-offset", type=float, default=0.0, help="Push point height relative to the handle [m]")
     parser.add_argument("--torso-squat", type=float, default=None, help="Override the task's torso pose with a squat of this angle [rad]")

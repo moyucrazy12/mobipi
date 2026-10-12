@@ -7,6 +7,12 @@ demo_NN_layout_LL_style_SS_seed_XXXX and listed in manifest.csv; failed
 recordings are deleted. Scenes without room for the robot to the right of the
 drawer (exit code 3) are skipped. Every attempt and its outcome is listed in
 attempts.csv, and its output is in logs/.
+
+By default the demos are randomized: the initial drawer opening is sampled from
+a range, and the scripted motion parameters given as two values (MIN MAX) are
+sampled uniformly per attempt (one value keeps them fixed). The sampled values
+are in attempts.csv. Base placement noise is off by default: even a few cm / deg
+puts the end of the push out of the left arm's reach.
 """
 import argparse
 import csv
@@ -15,15 +21,28 @@ import shutil
 import sys
 from pathlib import Path
 
+import numpy as np
+
 from collect_close_door_demos import all_style_ids, run_and_log, spread_order, write_manifest
 
 DEFAULT_SCRIPT = Path(__file__).resolve().with_name("auto_close_drawer.py")
 EXIT_SUCCESS, EXIT_SKIPPED = 0, 3
+# Scripted motion parameters of auto_close_drawer.py that can be randomized per attempt
+MOTION_PARAMS = ["push_edge_inset", "contact_z_offset", "tool_pitch", "push_lead"]
+
+
+def sample_param(values, rng):
+    """One value: fixed. Two values: uniform in [MIN, MAX]."""
+    if len(values) == 1:
+        return values[0]
+    if len(values) != 2 or values[0] > values[1]:
+        raise ValueError(f"Expected VALUE or MIN MAX, got {values}")
+    return float(rng.uniform(*values))
 
 
 def write_attempts(path, rows):
     with path.open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["attempt", "layout", "style", "seed", "outcome", "exit", "log"])
+        writer = csv.DictWriter(f, fieldnames=["attempt", "layout", "style", "seed", *MOTION_PARAMS, "outcome", "exit", "log"])
         writer.writeheader()
         writer.writerows(rows)
 
@@ -37,11 +56,15 @@ def main():
     parser.add_argument("--layouts", type=int, nargs="+", default=[1], help="RoboCasa layout ids to cycle through")
     parser.add_argument("--seed-start", type=int, default=0)
     parser.add_argument("--controller", default=None, help="Optional controller JSON override")
-    parser.add_argument("--push-edge-inset", type=float, default=0.10)
-    parser.add_argument("--contact-z-offset", type=float, default=0.0)
+    parser.add_argument("--base-pos-noise", type=float, default=0.0, help="Std of the base x / y placement noise [m]")
+    parser.add_argument("--base-yaw-noise", type=float, default=0.0, help="Std of the base yaw placement noise [deg]")
+    parser.add_argument("--drawer-open", type=float, nargs=2, default=[0.5, 1.0], metavar=("MIN", "MAX"),
+                        help="Initial drawer opening range (fraction of fully open)")
+    parser.add_argument("--push-edge-inset", type=float, nargs="+", default=[0.06, 0.14], help="VALUE or MIN MAX [m]")
+    parser.add_argument("--contact-z-offset", type=float, nargs="+", default=[-0.03, 0.01], help="VALUE or MIN MAX [m]")
+    parser.add_argument("--tool-pitch", type=float, nargs="+", default=[0.0, 6.0], help="VALUE or MIN MAX [deg]")
+    parser.add_argument("--push-lead", type=float, nargs="+", default=[0.02, 0.04], help="VALUE or MIN MAX [m]")
     parser.add_argument("--torso-squat", type=float, default=None)
-    parser.add_argument("--tool-pitch", type=float, default=0.0)
-    parser.add_argument("--push-lead", type=float, default=0.03)
     parser.add_argument("--steps-per-waypoint", type=int, default=4)
     parser.add_argument("--max-push-steps", type=int, default=1500)
     parser.add_argument("--render", action="store_true", help="Show the MuJoCo viewer for every attempt")
@@ -83,6 +106,8 @@ def main():
         attempt_dir = root / tag
         log_path = logs_dir / f"{tag}.log"
         shutil.rmtree(attempt_dir, ignore_errors=True)
+        rng = np.random.default_rng(seed)
+        motion = {name: sample_param(getattr(args, name), rng) for name in MOTION_PARAMS}
 
         cmd = [
             sys.executable, str(script),
@@ -90,10 +115,11 @@ def main():
             "--layout", str(layout),
             "--style", str(style),
             "--seed", str(seed),
-            "--push-edge-inset", str(args.push_edge_inset),
-            "--contact-z-offset", str(args.contact_z_offset),
-            "--tool-pitch", str(args.tool_pitch),
-            "--push-lead", str(args.push_lead),
+            "--base-pos-noise", str(args.base_pos_noise),
+            "--base-yaw-noise", str(args.base_yaw_noise),
+            "--drawer-open-min", str(args.drawer_open[0]),
+            "--drawer-open-max", str(args.drawer_open[1]),
+            *[a for name, value in motion.items() for a in ("--" + name.replace("_", "-"), f"{value:.4f}")],
             "--steps-per-waypoint", str(args.steps_per_waypoint),
             "--max-push-steps", str(args.max_push_steps),
             "--record-dir", str(attempt_dir),
@@ -142,6 +168,7 @@ def main():
 
         attempt_rows.append({
             "attempt": attempt, "layout": layout, "style": style, "seed": seed,
+            **{name: round(value, 4) for name, value in motion.items()},
             "outcome": outcome, "exit": rc, "log": str(log_path),
         })
         write_manifest(manifest_path, rows)
