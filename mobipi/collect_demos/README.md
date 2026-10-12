@@ -89,6 +89,8 @@ demos are not all the same trajectory:
 
 | Option | Default | Meaning |
 |---|---|---|
+| `--robot-front-offset` | `-0.18` | robot offset in front of the drawer [m] (RoboCasa: `-0.23`) |
+| `--robot-side-gap` | `0.3` | gap between the drawer's right edge and the robot [m] |
 | `--base-pos-noise` | `0` | std of the base x / y placement noise [m] |
 | `--base-yaw-noise` | `0` | std of the base yaw placement noise [deg] |
 | `--drawer-open MIN MAX` | `0.5 1.0` | initial drawer opening (1.0 = RoboCasa's fully open) |
@@ -100,11 +102,15 @@ demos are not all the same trajectory:
 The motion options take one value (fixed) or `MIN MAX` (sampled uniformly per
 attempt). Base placement noise is off by default: a few cm / deg already puts
 the end of the push out of the left arm's reach (most attempts fail with
-0.05 m / 5 deg). The left arm already works near its reach limit, which is also
-why the pitch and height ranges are narrow: negative pitch, pitch near 10 deg or
-a push point 3 cm above the handle make the gripper miss the pre-contact pose
-and catch on the cabinet trim. Pass `--drawer-open 0.9 1.0 --push-edge-inset 0.10
---contact-z-offset 0 --tool-pitch 0 --push-lead 0.03` for the old fixed setup.
+0.05 m / 5 deg). The left arm works near its reach limit: at RoboCasa's
+placement (23 cm in front of the drawer) the end of the push is just within
+reach, and varying the motion leaves the drawer a few cm open, so the robot
+stands 5 cm closer by default. The pitch and height ranges are narrow for the
+same reason: negative pitch, pitch near 10 deg or a push point 3 cm above the
+handle make the gripper miss the pre-contact pose and catch on the cabinet trim.
+
+For the old fixed setup, pass `--robot-front-offset=-0.23 --drawer-open 0.9 1.0
+--push-edge-inset 0.10 --contact-z-offset 0 --tool-pitch 0 --push-lead 0.03`.
 
 ## Convert the demos to a robomimic HDF5
 

@@ -91,6 +91,7 @@ def run(args):
         "randomize_cameras": False,
         "seed": args.seed,
         "drawer_open_range": [args.drawer_open_min, args.drawer_open_max],
+        "robot_offset": [args.robot_side_gap, args.robot_front_offset],
     }
     if args.base_pos_noise > 0 or args.base_yaw_noise > 0:
         config["randomize_base_init_pose"] = [args.base_pos_noise, args.base_pos_noise, np.deg2rad(args.base_yaw_noise)]
@@ -245,6 +246,8 @@ if __name__ == "__main__":
     parser.add_argument("--control-freq", type=int, default=20)
     parser.add_argument("--base-pos-noise", type=float, default=0.0, help="Std of the robot base x / y placement noise [m]")
     parser.add_argument("--base-yaw-noise", type=float, default=0.0, help="Std of the robot base yaw placement noise [deg]")
+    parser.add_argument("--robot-side-gap", type=float, default=0.3, help="Gap between the drawer's right edge and the robot [m]")
+    parser.add_argument("--robot-front-offset", type=float, default=-0.23, help="Robot offset along the drawer's front direction [m]")
     parser.add_argument("--drawer-open-min", type=float, default=0.9, help="Min initial drawer opening (fraction of fully open)")
     parser.add_argument("--drawer-open-max", type=float, default=1.0, help="Max initial drawer opening (fraction of fully open)")
     parser.add_argument("--push-edge-inset", type=float, default=0.10, help="Push point distance from the drawer's robot-side edge [m]")

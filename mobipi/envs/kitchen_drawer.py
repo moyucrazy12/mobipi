@@ -26,14 +26,19 @@ class CloseDrawerLeft(CloseDrawer):
         drawer_open_range (2-tuple): range the initial drawer opening is sampled
             from, as fractions of RoboCasa's fully open drawer (1.0 is 55% of the
             drawer depth). RoboCasa's CloseDrawer uses (0.9, 1.0).
+        robot_offset (2-tuple): robot placement relative to the drawer [m]: the
+            sideways gap between the drawer's right edge and the robot, and the
+            offset along the drawer's front direction (negative is in front).
+            ManipulateDrawer uses (0.3, -0.23).
         randomize_base_init_pose (float or 3-sequence): std of the Gaussian noise
             added to the robot base x [m], y [m] and yaw [rad] (RoboCasa kwarg).
     """
 
-    def __init__(self, *args, drawer_open_range=(0.9, 1.0), **kwargs):
+    def __init__(self, *args, drawer_open_range=(0.9, 1.0), robot_offset=(0.3, -0.23), **kwargs):
         lo, hi = drawer_open_range
         assert 0.0 <= lo <= hi <= 1.0, drawer_open_range
         self.drawer_open_range = (float(lo), float(hi))
+        self.robot_offset = (float(robot_offset[0]), float(robot_offset[1]))
         super().__init__(*args, **kwargs)
 
     # Scenes sampled per reset before giving up when none has room for the robot
@@ -47,12 +52,13 @@ class CloseDrawerLeft(CloseDrawer):
         # fixed, so it raises instead.
         for _ in range(self.MAX_SCENE_SAMPLES):
             Kitchen._load_model(self)
-            x_ofs = (self.drawer.width / 2) + 0.3
+            side_gap, front_ofs = self.robot_offset
+            x_ofs = (self.drawer.width / 2) + side_gap
             robot_base_pos, robot_base_ori = self.compute_robot_base_placement_pose(
-                ref_fixture=self.drawer, offset=(x_ofs, -0.23)
+                ref_fixture=self.drawer, offset=(x_ofs, front_ofs)
             )
             test_pos, _ = self.compute_robot_base_placement_pose(
-                ref_fixture=self.drawer, offset=(x_ofs + 0.3, -0.23)
+                ref_fixture=self.drawer, offset=(x_ofs + 0.3, front_ofs)
             )
             if not (self.check_fxtr_contact(test_pos) or self.check_sidewall_contact(test_pos)):
                 break
