@@ -54,3 +54,31 @@ python collect_close_door_demos.py \
   --handle-clearance 0.053 \
   --finish-angle 0.12
 ```
+# RBY1 Drawer Demo Collection
+
+`CloseDrawerLeft` (`mobipi/envs`) always places the robot to the right of the
+drawer and resets into a squat with the head turned toward it. Scenes without
+room on that side are skipped (exit code 3).
+
+## Run one drawer-closing demo
+
+```bash
+cd ~/mobipi_EP/mobipi/mobipi/collect_demos
+
+python auto_close_drawer.py --layout 1 --style 0 --seed 0 --record-dir drawer_raw
+```
+
+## Collect multiple successful demonstrations
+
+```bash
+cd ~/mobipi_EP/mobipi/mobipi/collect_demos
+
+python collect_close_drawer_demos.py \
+  --count 10 \
+  --layouts 1 \
+  --output rby1_drawer_demos_10
+```
+
+Successful demos are saved as `demo_NN_layout_LL_style_SS_seed_XXXX/ep_*` and
+listed in `manifest.csv`; `attempts.csv` lists every attempt with its outcome
+(success / failed / skipped).
