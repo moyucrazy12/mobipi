@@ -73,6 +73,50 @@ def set_base_vec(sim, base_vec):
     sim.forward()
 
 
+HEAD_JOINTS = ("robot0_head_0", "robot0_head_1")  # pan (left +), tilt (down +)
+TORSO_JOINTS = tuple(f"robot0_torso_{i}" for i in range(6))
+
+
+def squat_torso_pose(angle):
+    """Torso pose that lowers the upper body while keeping it upright (hip, knee, ankle-like pitch)."""
+    return (0.0, angle, -2.0 * angle, angle, 0.0, 0.0)
+
+
+# Fixed head / torso poses per task, used for demo collection, mobilization and
+# policy rollouts alike (tasks not listed keep the default upright pose looking
+# straight ahead). For the drawer the robot squats so the left arm can reach the
+# drawer front (0.3 and 0.5 rad failed in some training scenes, 0.4 closed all),
+# and the head is turned toward the drawer on the robot's left.
+HEAD_POSES = {
+    "CloseDrawerLeft": (1.0, 0.6),
+}
+TORSO_POSES = {
+    "CloseDrawerLeft": squat_torso_pose(0.4),
+}
+
+
+def set_part_pose(env, part, joints, pose):
+    """Sets the joints of a joint-position-controlled part and makes its controller hold them."""
+    for joint, value in zip(joints, pose):
+        env.sim.data.set_joint_qpos(joint, value)
+        env.sim.data.set_joint_qvel(joint, 0.0)
+    env.sim.forward()
+    controller = env.robots[0].composite_controller.part_controllers.get(part)
+    if controller is not None:
+        controller.update(force=True)
+        controller.reset_goal()
+
+
+def set_task_pose(env, env_name, torso_pose=None, head_pose=None):
+    """Applies the task's fixed torso and head poses (or the given overrides)."""
+    torso_pose = torso_pose if torso_pose is not None else TORSO_POSES.get(env_name)
+    head_pose = head_pose if head_pose is not None else HEAD_POSES.get(env_name)
+    if torso_pose is not None:
+        set_part_pose(env, "torso", TORSO_JOINTS, torso_pose)
+    if head_pose is not None:
+        set_part_pose(env, "head", HEAD_JOINTS, head_pose)
+
+
 def get_robot_joint_qpos(env):
     robot = env.robots[0]
     return env.sim.data.qpos[robot._ref_joint_pos_indexes].copy()
