@@ -16,3 +16,5 @@ mobipi/macros_private.py
 !install.sh
 
 .vscode/
+datasets/
+mobipi/collect_demos/rby1*
