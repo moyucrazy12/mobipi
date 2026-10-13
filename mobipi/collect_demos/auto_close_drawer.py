@@ -48,6 +48,9 @@ from auto_close_microwave_door import (
 
 EXIT_SUCCESS, EXIT_FAILURE, EXIT_SKIPPED = 0, 2, 3
 UP = np.array([0.0, 0.0, 1.0])
+# Largest change of the commanded TCP position between two steps when switching
+# phases [m]. The commands are the policy's training labels, so keep them smooth.
+MAX_CMD_STEP = 0.01
 
 
 def drawer_geometry(base_env, push_edge_inset):
@@ -186,6 +189,12 @@ def run(args):
     print(f"aligned: pos_err={err:.3f} rot_err={np.degrees(ang_err):.1f} deg")
 
     print("\n===== Contact search =====")
+    # Cover the standoff gradually instead of commanding the search start in one step
+    # (lerp_points' smoothstep peaks at 1.5x the mean step)
+    search_start = push_point - args.clearance * close_dir
+    n_standoff = int(np.ceil(1.5 * np.linalg.norm(search_start - pre_contact) / MAX_CMD_STEP)) + 1
+    for p in lerp_points(pre_contact, search_start, n_standoff):
+        step_to(p, contact_rot)
     contact_found = False
     clearance = args.clearance
     for step in range(400):
@@ -206,6 +215,9 @@ def run(args):
 
     print("\n===== Push =====")
     success = False
+    # The push target is set relative to the gripper, which lags the contact-search
+    # target; start from that target and move it at most MAX_CMD_STEP per step
+    target_along = float(np.dot(target - push_point, close_dir))
     for step in range(args.max_push_steps):
         if base_env._check_success():
             success = True
@@ -213,7 +225,8 @@ def run(args):
         tcp, _ = site_pose(base_env.sim, tcp_site)
         # stay on the line through the push point, a little ahead of the gripper
         along = float(np.dot(tcp - push_point, close_dir))
-        target = push_point + (along + args.push_lead) * close_dir
+        target_along = float(np.clip(along + args.push_lead, target_along - MAX_CMD_STEP, target_along + MAX_CMD_STEP))
+        target = push_point + target_along * close_dir
         actual, err = step_to(target, contact_rot)
         if step % 20 == 0:
             blocking = [c[1] for c in rby1_utils.robot_env_contacts(base_env.sim)]
