@@ -56,6 +56,9 @@ python collect_close_door_demos.py \
 ```
 # RBY1 Drawer Demo Collection
 
+The full pipeline from these demos to a trained and evaluated policy is in
+[docs/rby1_close_drawer_policy.md](../../docs/rby1_close_drawer_policy.md).
+
 `CloseDrawerLeft` (`mobipi/envs`) always places the robot to the right of the
 drawer and resets into a squat with the head turned toward it. When a sampled
 scene has no room on that side it samples another one; if none of 20 has room,
@@ -130,3 +133,46 @@ environment (from the `env_kwargs.json` saved with each recording, so the base
 noise and drawer opening range carry over; all gathered demos must share them). Render image observations from it with robomimic's
 `dataset_states_to_obs.py`, e.g. `--camera_names robot0_head_camera
 robot0_left_eye_in_hand --camera_height 128 --camera_width 128`.
+
+## Generate more demos with MimicGen
+
+MimicGen turns the scripted source demos into more demos: it splits each one
+at the first robot-drawer contact (approach / push), transforms the segments to
+the drawer handle in newly sampled scenes, executes them and keeps the
+successful ones. Interface: `MG_RBY1_CloseDrawerLeft`
+(`external/mimicgen/.../mg_rby1_close_drawer.py`); config:
+`configs/mimicgen/CloseDrawerLeft_RBY1_300mg.json` (300 demos, layouts
+0/2/3/5/6, all styles). Run from the repository root:
+
+```bash
+# 1. scripted source demos -> source HDF5
+python mobipi/collect_demos/collect_close_drawer_demos.py --count 50 --layouts 0 2 3 5 6 \
+  --output mobipi/collect_demos/rby1_drawer_demos_50
+python mobipi/collect_demos/gather_demos_hdf5.py --input mobipi/collect_demos/rby1_drawer_demos_50 \
+  --output datasets/close_drawer_mg/source.hdf5
+
+# (1.5. optional: to check the demos, you can use robomimic's `playback_dataset.py`)
+cd external/robomimic
+MUJOCO_GL=egl python robomimic/scripts/playback_dataset.py \
+  --dataset ../../datasets/close_drawer_mg/source.hdf5 \
+  --use-actions --render_image_names robot0_head_camera \
+  --video_path ../../datasets/drawer_actions.mp4 --n 5 --video_skip 1
+cd ../..
+
+# 2. add MimicGen datagen_info and the approach / push boundary (modifies the file in place)
+(cd external/mimicgen/mimicgen/scripts && python prepare_src_dataset_multistyle.py \
+  --dataset ../../../../datasets/close_drawer_mg/source.hdf5 \
+  --manifest ../../../../mobipi/collect_demos/rby1_drawer_demos_50/manifest.csv \
+  --env-interface MG_RBY1_CloseDrawerLeft --contact-signal stage_contact_drawer)
+
+# 3. generate (writes generated_datasets/mimicgen/CloseDrawerLeft_RBY1_300mg/demo.hdf5)
+python external/mimicgen/mimicgen/scripts/generate_dataset.py \
+  --config configs/mimicgen/CloseDrawerLeft_RBY1_300mg.json
+```
+
+`--num_demos`, `--source` and `--folder` override the config. The generated
+`demo.hdf5` has the same format as the gathered one (states, 25-D actions,
+model_file, ep_meta, env_args; no `actions_abs`, which `dataset_states_to_obs.py`
+fills in from the absolute WholeBody IK actions), so render its camera
+observations with `dataset_states_to_obs.py` as above. About a third of the
+generation attempts succeed (~25 s each), so 300 demos take roughly 6 hours.

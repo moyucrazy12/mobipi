@@ -95,6 +95,7 @@ def run(args):
         "seed": args.seed,
         "drawer_open_range": [args.drawer_open_min, args.drawer_open_max],
         "robot_offset": [args.robot_side_gap, args.robot_front_offset],
+        "robot_yaw": float(np.deg2rad(args.robot_yaw)),
     }
     if args.base_pos_noise > 0 or args.base_yaw_noise > 0:
         config["randomize_base_init_pose"] = [args.base_pos_noise, args.base_pos_noise, np.deg2rad(args.base_yaw_noise)]
@@ -168,9 +169,20 @@ def run(args):
     for p in lerp_points(pre_high, pre_contact, max(args.approach_points // 4, 2)):
         trajectory.append((p, contact_rot))
 
+    # Closest approach of the arm joints to their limits, per phase
+    arm_joints = robot.composite_controller.part_controllers[active_arm].joint_names
+    arm_jids = [raw_model(base_env.sim).joint(j).id for j in arm_joints]
+    arm_ranges = raw_model(base_env.sim).jnt_range[arm_jids]
+    limit_margin = {}
+    phase = ["approach"]
+
     def step_to(target, rot, repeats=1):
-        return execute_target(env, base_env, robot, active_arm, tcp_site, target, rot, hold_commands,
-                              T_tcp_ref, args.gripper, repeats=repeats)
+        result = execute_target(env, base_env, robot, active_arm, tcp_site, target, rot, hold_commands,
+                                T_tcp_ref, args.gripper, repeats=repeats)
+        q = np.array([base_env.sim.data.get_joint_qpos(j) for j in arm_joints])
+        margin = np.minimum(q - arm_ranges[:, 0], arm_ranges[:, 1] - q)
+        limit_margin[phase[0]] = np.minimum(limit_margin.get(phase[0], margin), margin)
+        return result
 
     d = raw_data(base_env.sim)
     print("\n===== Approach =====")
@@ -189,6 +201,7 @@ def run(args):
     print(f"aligned: pos_err={err:.3f} rot_err={np.degrees(ang_err):.1f} deg")
 
     print("\n===== Contact search =====")
+    phase[0] = "search"
     # Cover the standoff gradually instead of commanding the search start in one step
     # (lerp_points' smoothstep peaks at 1.5x the mean step)
     search_start = push_point - args.clearance * close_dir
@@ -214,6 +227,7 @@ def run(args):
         return EXIT_FAILURE
 
     print("\n===== Push =====")
+    phase[0] = "push"
     success = False
     # The push target is set relative to the gripper, which lags the contact-search
     # target; start from that target and move it at most MAX_CMD_STEP per step
@@ -234,6 +248,8 @@ def run(args):
     print("\n===== Result =====")
     print("success:", success)
     print("drawer final qpos:", round(float(d.qpos[qadr]), 4))
+    for name, margin in limit_margin.items():
+        print(f"min joint-limit margin [deg] {name:8s}:", np.round(np.degrees(margin), 1))
     if args.record_dir and hasattr(env, "ep_directory"):
         print("raw demo:", env.ep_directory)
     if args.keep_open:
@@ -261,6 +277,7 @@ if __name__ == "__main__":
     parser.add_argument("--base-yaw-noise", type=float, default=0.0, help="Std of the robot base yaw placement noise [deg]")
     parser.add_argument("--robot-side-gap", type=float, default=0.3, help="Gap between the drawer's right edge and the robot [m]")
     parser.add_argument("--robot-front-offset", type=float, default=-0.23, help="Robot offset along the drawer's front direction [m]")
+    parser.add_argument("--robot-yaw", type=float, default=0.0, help="Extra robot base yaw toward the drawer (left +) [deg]")
     parser.add_argument("--drawer-open-min", type=float, default=0.9, help="Min initial drawer opening (fraction of fully open)")
     parser.add_argument("--drawer-open-max", type=float, default=1.0, help="Max initial drawer opening (fraction of fully open)")
     parser.add_argument("--push-edge-inset", type=float, default=0.10, help="Push point distance from the drawer's robot-side edge [m]")

@@ -62,6 +62,9 @@ def main():
     parser.add_argument("--robot-front-offset", type=float, default=-0.18,
                         help="Robot offset along the drawer's front direction [m] (RoboCasa: -0.23, which leaves "
                              "the end of the push at the edge of the left arm's reach)")
+    parser.add_argument("--robot-yaw", type=float, default=5.0,
+                        help="Extra robot base yaw toward the drawer (left +) [deg]. At 0 the left shoulder hides a fully "
+                             "open drawer's front from the head camera; 10 shows it but costs reach (37%% vs 60%% success)")
     parser.add_argument("--drawer-open", type=float, nargs=2, default=[0.5, 1.0], metavar=("MIN", "MAX"),
                         help="Initial drawer opening range (fraction of fully open)")
     parser.add_argument("--push-edge-inset", type=float, nargs="+", default=[0.06, 0.14], help="VALUE or MIN MAX [m]")
@@ -123,6 +126,7 @@ def main():
             "--base-yaw-noise", str(args.base_yaw_noise),
             f"--robot-side-gap={args.robot_side_gap}",
             f"--robot-front-offset={args.robot_front_offset}",
+            f"--robot-yaw={args.robot_yaw}",
             "--drawer-open-min", str(args.drawer_open[0]),
             "--drawer-open-max", str(args.drawer_open[1]),
             *[a for name, value in motion.items() for a in ("--" + name.replace("_", "-"), f"{value:.4f}")],
