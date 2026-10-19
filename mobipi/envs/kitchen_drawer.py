@@ -30,15 +30,19 @@ class CloseDrawerLeft(CloseDrawer):
             sideways gap between the drawer's right edge and the robot, and the
             offset along the drawer's front direction (negative is in front).
             ManipulateDrawer uses (0.3, -0.23).
+        robot_yaw (float): extra base yaw [rad] added to the placement, positive
+            turns the robot left (toward the drawer). 0 keeps RoboCasa's heading.
         randomize_base_init_pose (float or 3-sequence): std of the Gaussian noise
             added to the robot base x [m], y [m] and yaw [rad] (RoboCasa kwarg).
     """
 
-    def __init__(self, *args, drawer_open_range=(0.9, 1.0), robot_offset=(0.3, -0.23), **kwargs):
+    def __init__(self, *args, drawer_open_range=(0.9, 1.0), robot_offset=(0.3, -0.23), robot_yaw=0.0,
+                 **kwargs):
         lo, hi = drawer_open_range
         assert 0.0 <= lo <= hi <= 1.0, drawer_open_range
         self.drawer_open_range = (float(lo), float(hi))
         self.robot_offset = (float(robot_offset[0]), float(robot_offset[1]))
+        self.robot_yaw = float(robot_yaw)
         super().__init__(*args, **kwargs)
 
     # Scenes sampled per reset before giving up when none has room for the robot
@@ -74,6 +78,8 @@ class CloseDrawerLeft(CloseDrawer):
             )
         robot_model = self.robots[0].robot_model
         self.drawer_side = "left"
+        robot_base_ori = np.array(robot_base_ori, dtype=float)
+        robot_base_ori[2] += self.robot_yaw
 
         if self.place_robot:
             if self.force_robot_placement:
