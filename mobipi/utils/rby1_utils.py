@@ -93,6 +93,12 @@ HEAD_POSES = {
 TORSO_POSES = {
     "CloseDrawerLeft": squat_torso_pose(0.4),
 }
+LEFT_ARM_JOINTS = tuple(f"robot0_left_arm_{i}" for i in range(7))
+# Left arm start pose for CloseDrawerLeft (env kwarg left_arm_start) that aims the wrist camera at the
+# drawer front from ~0.25 m above and ~0.2 m to the robot side: the front is in view from 50 % to 100 %
+# open, which the head camera cannot show (the left shoulder hides a fully open front). Solved by IK in
+# the base frame with 5 deg robot_yaw; every joint is >= 15 deg from its limits.
+DRAWER_LOOK_ARM_POSE = (1.6601, 0.2118, 0.1391, -2.3562, -0.7958, 0.0247, -0.5194)
 
 
 def set_part_pose(env, part, joints, pose):

@@ -65,6 +65,8 @@ def main():
     parser.add_argument("--robot-yaw", type=float, default=5.0,
                         help="Extra robot base yaw toward the drawer (left +) [deg]. At 0 the left shoulder hides a fully "
                              "open drawer's front from the head camera; 10 shows it but costs reach (37%% vs 60%% success)")
+    parser.add_argument("--look-start", action="store_true",
+                        help="Start with the left arm aiming the wrist camera at the drawer (rby1_utils.DRAWER_LOOK_ARM_POSE)")
     parser.add_argument("--drawer-open", type=float, nargs=2, default=[0.5, 1.0], metavar=("MIN", "MAX"),
                         help="Initial drawer opening range (fraction of fully open)")
     parser.add_argument("--push-edge-inset", type=float, nargs="+", default=[0.06, 0.14], help="VALUE or MIN MAX [m]")
@@ -134,6 +136,8 @@ def main():
             "--max-push-steps", str(args.max_push_steps),
             "--record-dir", str(attempt_dir),
         ]
+        if args.look_start:
+            cmd.append("--look-start")
         if args.torso_squat is not None:
             cmd += ["--torso-squat", str(args.torso_squat)]
         if args.controller is not None:

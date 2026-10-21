@@ -32,17 +32,21 @@ class CloseDrawerLeft(CloseDrawer):
             ManipulateDrawer uses (0.3, -0.23).
         robot_yaw (float): extra base yaw [rad] added to the placement, positive
             turns the robot left (toward the drawer). 0 keeps RoboCasa's heading.
+        left_arm_start (7-sequence or None): left arm joint positions [rad] to
+            reset into (e.g. rby1_utils.DRAWER_LOOK_ARM_POSE); None keeps the
+            robot's default arm pose.
         randomize_base_init_pose (float or 3-sequence): std of the Gaussian noise
             added to the robot base x [m], y [m] and yaw [rad] (RoboCasa kwarg).
     """
 
     def __init__(self, *args, drawer_open_range=(0.9, 1.0), robot_offset=(0.3, -0.23), robot_yaw=0.0,
-                 **kwargs):
+                 left_arm_start=None, **kwargs):
         lo, hi = drawer_open_range
         assert 0.0 <= lo <= hi <= 1.0, drawer_open_range
         self.drawer_open_range = (float(lo), float(hi))
         self.robot_offset = (float(robot_offset[0]), float(robot_offset[1]))
         self.robot_yaw = float(robot_yaw)
+        self.left_arm_start = None if left_arm_start is None else tuple(float(q) for q in left_arm_start)
         super().__init__(*args, **kwargs)
 
     # Scenes sampled per reset before giving up when none has room for the robot
@@ -106,3 +110,5 @@ class CloseDrawerLeft(CloseDrawer):
         # start in this pose and reset_to() / playback restore it with matching
         # controller goals.
         rby1_utils.set_task_pose(self, "CloseDrawerLeft")
+        if self.left_arm_start is not None:
+            rby1_utils.set_part_pose(self, "left", rby1_utils.LEFT_ARM_JOINTS, self.left_arm_start)

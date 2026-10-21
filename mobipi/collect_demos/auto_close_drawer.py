@@ -96,6 +96,7 @@ def run(args):
         "drawer_open_range": [args.drawer_open_min, args.drawer_open_max],
         "robot_offset": [args.robot_side_gap, args.robot_front_offset],
         "robot_yaw": float(np.deg2rad(args.robot_yaw)),
+        "left_arm_start": list(rby1_utils.DRAWER_LOOK_ARM_POSE) if args.look_start else None,
     }
     if args.base_pos_noise > 0 or args.base_yaw_noise > 0:
         config["randomize_base_init_pose"] = [args.base_pos_noise, args.base_pos_noise, np.deg2rad(args.base_yaw_noise)]
@@ -278,6 +279,8 @@ if __name__ == "__main__":
     parser.add_argument("--robot-side-gap", type=float, default=0.3, help="Gap between the drawer's right edge and the robot [m]")
     parser.add_argument("--robot-front-offset", type=float, default=-0.23, help="Robot offset along the drawer's front direction [m]")
     parser.add_argument("--robot-yaw", type=float, default=0.0, help="Extra robot base yaw toward the drawer (left +) [deg]")
+    parser.add_argument("--look-start", action="store_true",
+                        help="Start with the left arm aiming the wrist camera at the drawer (rby1_utils.DRAWER_LOOK_ARM_POSE)")
     parser.add_argument("--drawer-open-min", type=float, default=0.9, help="Min initial drawer opening (fraction of fully open)")
     parser.add_argument("--drawer-open-max", type=float, default=1.0, help="Max initial drawer opening (fraction of fully open)")
     parser.add_argument("--push-edge-inset", type=float, default=0.10, help="Push point distance from the drawer's robot-side edge [m]")
