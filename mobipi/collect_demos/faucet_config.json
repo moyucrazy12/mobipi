@@ -1,0 +1,88 @@
+{
+  "seed": 0,
+  "environment": {
+    "robots": "RBY1",
+    "gripper_types": "RBY1FaucetGripper",
+    "layout_ids": [
+      1
+    ],
+    "style_ids": [
+      10
+    ],
+    "initialization_noise": null,
+    "randomize_base_init_pose": null,
+    "randomize_cameras": false,
+    "control_freq": 20,
+    "camera_names": [
+      "faucet_overview",
+      "robot0_right_eye_in_hand"
+    ],
+    "camera_heights": 128,
+    "camera_widths": 128
+  },
+  "script": {
+    "cartesian_increment": 0.002,
+    "max_tracking_error": 0.06,
+    "tracking_patience": 12,
+    "waypoint_tolerance": 0.015,
+    "settle_steps": 80,
+    "target_angle": 0.48,
+    "approach_world": null,
+    "video_camera": "faucet_overview"
+  },
+  "mimicgen": {
+    "seed": 42,
+    "target_successes": 100,
+    "max_attempts": 300,
+    "select_src_per_subtask": false,
+    "interpolate_from_last_target_pose": false,
+    "task_spec": {
+      "approach": {
+        "object_ref": "faucet",
+        "subtask_term_signal": "contact",
+        "subtask_term_offset_range": [
+          0,
+          0
+        ],
+        "selection_strategy": "nearest_neighbor_object",
+        "selection_strategy_kwargs": {
+          "nn_k": 1
+        },
+        "action_noise": 0.0,
+        "num_interpolation_steps": 30,
+        "num_fixed_steps": 5
+      },
+      "activate": {
+        "object_ref": "faucet",
+        "subtask_term_signal": "water_on",
+        "subtask_term_offset_range": [
+          0,
+          0
+        ],
+        "selection_strategy": "nearest_neighbor_object",
+        "selection_strategy_kwargs": {
+          "nn_k": 1
+        },
+        "action_noise": 0.0,
+        "num_interpolation_steps": 0,
+        "num_fixed_steps": 0
+      },
+      "release_retreat": {
+        "object_ref": "faucet",
+        "subtask_term_signal": null,
+        "subtask_term_offset_range": [
+          0,
+          0
+        ],
+        "selection_strategy": "nearest_neighbor_object",
+        "selection_strategy_kwargs": {
+          "nn_k": 1
+        },
+        "action_noise": 0.0,
+        "num_interpolation_steps": 0,
+        "num_fixed_steps": 0
+      }
+    }
+  },
+  "generation_environment": {}
+}
