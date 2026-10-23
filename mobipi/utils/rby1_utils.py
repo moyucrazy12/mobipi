@@ -16,7 +16,7 @@ import robosuite.utils.transform_utils as T
 from robocasa.utils.env_utils import grid_based_pose_sampling
 
 from mobipi.utils import nav_utils
-from mobipi.utils.nav_utils import angle_wrap, check_path_collision, rrt_planner
+from mobipi.utils.nav_utils import angle_wrap, check_path_collision, is_collision_free, rrt_planner
 
 
 ROOT_BODY = "robot0_base"  # stays at the env's robot placement; the base joints move the robot relative to it
@@ -38,6 +38,13 @@ BASE_K_V = 1.5
 BASE_K_W = 3.0
 BASE_POS_TOL = 0.02
 BASE_HEADING_TOL = 0.01
+
+# Staging waypoint this far behind the goal along the goal heading (tried in this
+# order until one is collision free), so the robot turns to the final heading in
+# open space and ends with a straight drive in. Turning in place at the goal
+# sweeps the footprint (turning about the axle, ~0.44 m radius) into fixtures
+# beside it, which the planner's point-cloud check around the base origin misses.
+APPROACH_DISTS = (0.5, 0.4, 0.3, 0.2)
 
 
 def get_base_vec(sim):
@@ -420,15 +427,39 @@ class _BaseDriver:
             self.stuck = True
 
 
+def approach_pose(k_col, start_vec, target_vec, dists=APPROACH_DISTS):
+    """
+    Staging pose behind `target_vec` along its heading (see APPROACH_DISTS), or
+    None if the robot is already lined up behind the target or no staging pose
+    is collision free.
+    """
+    target_vec = np.asarray(target_vec, dtype=float)
+    u = np.array([np.cos(target_vec[2]), np.sin(target_vec[2])])
+    delta = target_vec[:2] - np.asarray(start_vec[:2])
+    along, lateral = delta @ u, abs(delta[0] * u[1] - delta[1] * u[0])
+    if 0 <= along <= max(dists) and lateral < 2 * BASE_POS_TOL \
+            and abs(angle_wrap(target_vec[2] - start_vec[2])) < 0.1:
+        return None
+    for dist in dists:
+        pose = np.r_[target_vec[:2] - dist * u, target_vec[2]]
+        if k_col is None or is_collision_free(k_col, [pose]):
+            return pose
+    print("[rby1_utils.py] No collision-free approach pose behind the target; driving to it directly")
+    return None
+
+
 def move_to_pose(env, target_vec, k_col, floor_fixture_bounds_2d,
                  render_camera="robot0_head_camera", render_size=256,
-                 settle_steps=20, gripper_action=None, use_rrt=True, mode="velocity"):
+                 settle_steps=20, gripper_action=None, use_rrt=True, mode="velocity",
+                 use_approach=True):
     """
     Navigates the RB-Y1 base to `target_vec` = [x, y, yaw].
 
     Plans like `nav_utils.move_to_pose` (straight line, RRT if blocked) and
     executes the plan as differential-drive maneuvers (rotate, drive straight,
-    rotate; no lateral motion). With `mode="velocity"` the maneuvers are tracked
+    rotate; no lateral motion). With `use_approach`, the plan goes to a staging
+    pose behind the target first (`approach_pose`), turns to the target heading
+    there and drives straight in. With `mode="velocity"` the maneuvers are tracked
     in closed loop through base velocity commands. With `mode="kinematic"` the
     base is moved along the plan directly at `nav_utils.move_to_pose`'s
     speed limits, ignoring base dynamics. Penetrating robot-environment
@@ -447,15 +478,26 @@ def move_to_pose(env, target_vec, k_col, floor_fixture_bounds_2d,
     nav_utils.X_MIN, nav_utils.X_MAX = xy_min[0], xy_max[0]
     nav_utils.Y_MIN, nav_utils.Y_MAX = xy_min[1], xy_max[1]
 
+    staging_vec = approach_pose(k_col, init_vec, target_vec) if use_approach else None
+    plan_goal = target_vec if staging_vec is None else staging_vec
+
     used_rrt = False
-    waypoints = [tuple(init_vec), tuple(target_vec)]
-    if use_rrt and not check_path_collision(k_col, init_vec, target_vec, steps=100):
+    waypoints = [tuple(init_vec), tuple(plan_goal)]
+    if use_rrt and not check_path_collision(k_col, init_vec, plan_goal, steps=100):
         print("[rby1_utils.py] Straight line path not collision free, using RRT...")
-        waypoints = rrt_planner(k_col=k_col, start=tuple(init_vec), goal=tuple(target_vec))
+        waypoints = rrt_planner(k_col=k_col, start=tuple(init_vec), goal=tuple(plan_goal))
         used_rrt = True
         # a failed RRT can return just [goal]
         if not np.allclose(waypoints[0][:2], init_vec[:2]):
             waypoints = [tuple(init_vec)] + list(waypoints)
+    # the target itself is often within the planner's collision radius of the
+    # fixture it faces, so the straight drive in from the staging pose is not checked
+    if staging_vec is not None:
+        waypoints = list(waypoints) + [tuple(target_vec)]
+    # waypoint index -> heading to turn to on arrival
+    final_headings = {len(waypoints) - 1: target_vec[2]}
+    if staging_vec is not None:
+        final_headings[len(waypoints) - 2] = target_vec[2]
 
     base_vec_history = [init_vec]
     collision_history = []
@@ -472,9 +514,8 @@ def move_to_pose(env, target_vec, k_col, floor_fixture_bounds_2d,
     stuck = False
     if mode == "kinematic":
         curr = init_vec.copy()
-        for i, wp in enumerate(waypoints[1:]):
-            is_last = i == len(waypoints) - 2
-            for pose in _diff_drive_poses(curr, wp[:2], final_heading=target_vec[2] if is_last else None):
+        for i, wp in enumerate(waypoints[1:], start=1):
+            for pose in _diff_drive_poses(curr, wp[:2], final_heading=final_headings.get(i)):
                 set_base_vec(sim, pose)
                 set_robot_joint_qpos(env, reset_joint_qpos)
                 sim.forward()
@@ -483,8 +524,11 @@ def move_to_pose(env, target_vec, k_col, floor_fixture_bounds_2d,
     else:
         driver = _BaseDriver(env, gripper_action, reset_joint_qpos, record_step)
         target_axle = driver.axle_xy(target_vec)
-        for wp in waypoints[1:-1]:
-            driver.go_to(wp[:2])
+        for i, wp in enumerate(waypoints[1:-1], start=1):
+            if i in final_headings:  # staging pose: line up the axle exactly behind the target
+                driver.go_to(driver.axle_xy(wp), final_heading=final_headings[i])
+            else:
+                driver.go_to(wp[:2])
         driver.go_to(target_axle, final_heading=target_vec[2])
         # correct a residual offset once (turn toward it, drive, turn back)
         if np.linalg.norm(driver.pose()[:2] - target_axle) > 2 * BASE_POS_TOL:
@@ -508,6 +552,7 @@ def move_to_pose(env, target_vec, k_col, floor_fixture_bounds_2d,
     info = dict(
         base_vec_history=np.array(base_vec_history),
         waypoints=np.array(waypoints),
+        approach_pose=staging_vec,
         used_rrt=used_rrt,
         mode=mode,
         stuck=stuck,
