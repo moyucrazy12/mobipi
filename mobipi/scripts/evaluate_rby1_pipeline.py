@@ -1,9 +1,10 @@
 r"""Run the complete RB-Y1 pipeline over seeds and save resumable results.
 
-Other options are forwarded to run_rby1_pipeline; --scene-dir is required.
-For example, from the repository root in the mobipi_pipeline environment:
+Other options are forwarded to run_rby1_pipeline; --scene-dir is required and
+--task selects the task (default close_microwave). For example, from the
+repository root in the mobipi_pipeline environment:
 
-    python -m mobipi.scripts.evaluate_rby1_pipeline \
+    python -m mobipi.scripts.evaluate_rby1_pipeline --task close_microwave \
         --scene-dir scene_data/close_single_door/layout1_style1 \
         --skip-detection --num-seeds 20 --output-dir logs/rby1_pipeline/seeds_0_19
 
@@ -24,6 +25,7 @@ import subprocess
 import sys
 import time
 
+from mobipi.pipeline import tasks
 from mobipi.scripts import run_rby1_pipeline as pipeline
 
 
@@ -132,7 +134,7 @@ def run_seed(seed, output, pipeline_args, timeout_minutes):
     return row
 
 
-def save_summary(output, seeds, rows):
+def save_summary(output, seeds, rows, success_definition):
     ordered = [rows[seed] for seed in seeds if seed in rows]
     finished = [row for row in ordered if row["status"] != "interrupted"]
     successful = [row["seed"] for row in finished if row["success"]]
@@ -142,7 +144,7 @@ def save_summary(output, seeds, rows):
     summary = dict(requested_seeds=seeds, completed=len(finished), successful_seeds=successful,
                    success_rate=len(successful) / len(finished) if finished else None,
                    seeds_by_status=by_status, pending_seeds=[seed for seed in seeds if seed not in rows],
-                   success_definition="Navigation, stable door closure, and arm return all succeed",
+                   success_definition=success_definition,
                    success_rate_definition="Successful seeds / finished seeds, including errors and timeouts")
     atomic_json(output / "summary.json", summary)
     if ordered:
@@ -169,7 +171,9 @@ def main(argv=None):
         arguments.error("Use unique seeds between 0 and 429496 (the pose sampler seeds NumPy with seed * 10000)")
     run_parser = pipeline.parser()
     run_parser.allow_abbrev = False
-    settings = vars(run_parser.parse_args(forwarded))
+    run_args = run_parser.parse_args(forwarded)
+    task = pipeline.apply_task_defaults(run_args)
+    settings = vars(run_args)
     settings.pop("seed")
     settings.pop("output_dir")
     pipeline_args = []
@@ -191,8 +195,10 @@ def main(argv=None):
         inputs.update(scene_cloud=fingerprint(scene / "pc.ply"), scene_model=fingerprint(scene_models[-1]))
     except OSError as error:
         arguments.error(str(error))
+    # The pipeline and its task modules; editing either invalidates --resume.
+    code = [Path(pipeline.__file__), *sorted(Path(tasks.__file__).parent.glob("*.py"))]
     protocol = dict(pipeline_settings=settings, inputs=inputs, python=sys.executable,
-                    pipeline_sha256=hashlib.sha256(Path(pipeline.__file__).read_bytes()).hexdigest(),
+                    pipeline_sha256=hashlib.sha256(b"".join(path.read_bytes() for path in code)).hexdigest(),
                     timeout_minutes=args.timeout_minutes)
     output = args.output_dir.expanduser().resolve()
     if args.resume:
@@ -213,14 +219,14 @@ def main(argv=None):
             saved = output / f"seed_{seed}" / "evaluation.json"
             if args.resume and saved.is_file():
                 rows[seed] = json.loads(saved.read_text())
-        save_summary(output, seeds, rows)
+        save_summary(output, seeds, rows, task.success_definition)
         for index, seed in enumerate(seeds, 1):
             if seed in rows and rows[seed]["status"] != "interrupted":
                 print(f"[{index}/{len(seeds)}] seed={seed}: skip finished ({rows[seed]['status']})", flush=True)
                 continue
             print(f"[{index}/{len(seeds)}] seed={seed}: starting; logs in {output / f'seed_{seed}'}", flush=True)
             rows[seed] = run_seed(seed, output, pipeline_args, args.timeout_minutes)
-            summary = save_summary(output, seeds, rows)
+            summary = save_summary(output, seeds, rows, task.success_definition)
             row = rows[seed]
             print(f"seed={seed}: {row['status']} ({row['wall_seconds']:.1f}s); "
                   f"successes={len(summary['successful_seeds'])}/{summary['completed']}", flush=True)
@@ -228,7 +234,7 @@ def main(argv=None):
                 if row["returncode"] == 2:
                     print("Pipeline rejected the configuration; stopping the batch. See the seed log.", flush=True)
                 break
-        summary = save_summary(output, seeds, rows)
+        summary = save_summary(output, seeds, rows, task.success_definition)
         print(f"Successful seeds: {summary['successful_seeds']}\nResults: {output}", flush=True)
 
 

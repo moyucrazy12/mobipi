@@ -1,10 +1,12 @@
-"""Select a base pose with Mobi-pi, navigate RB-Y1 there, then run its policy.
+r"""Select a base pose with Mobi-pi, navigate RB-Y1 there, then run its policy.
 
 Run from the repository root in an environment with the policy and mobilization
 dependencies installed. The dataset must contain RGB observations and a train
 mask; the scene directory must contain pc.ply and a trained splatfacto model.
+--task selects the task module (mobipi/pipeline/tasks) and its default
+checkpoint and dataset.
 
-    python -m mobipi.scripts.run_rby1_pipeline \
+    python -m mobipi.scripts.run_rby1_pipeline --task close_microwave \
         --scene-dir scene_data/close_single_door/layout1_style1 \
         --skip-detection --vis
 """
@@ -16,17 +18,17 @@ import json
 from pathlib import Path
 import time
 
+from mobipi.pipeline.tasks import TASKS, get_task
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def parser():
-    result = argparse.ArgumentParser(description=__doc__)
-    result.add_argument("--checkpoint", type=Path, default=ROOT / "ckpts/model_115_cartesian.pth")
-    result.add_argument(
-        "--dataset", type=Path,
-        default=ROOT / "data/mimicgen/CloseDoorLeft_RBY1_115mg/demo_im128_head_wrist_clean37.hdf5",
-        help="RGB demonstration HDF5 used for DINO scoring",
-    )
+    result = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    result.add_argument("--task", choices=sorted(TASKS), default="close_microwave")
+    result.add_argument("--checkpoint", type=Path, default=None, help="Policy checkpoint (default: the task's)")
+    result.add_argument("--dataset", type=Path, default=None,
+                        help="RGB demonstration HDF5 used for DINO scoring (default: the task's)")
     result.add_argument("--scene-dir", type=Path, required=True, help="Scene folder containing pc.ply and model/")
     result.add_argument("--filter-key", default="train")
     result.add_argument("--layout-id", type=int, default=1)
@@ -38,6 +40,11 @@ def parser():
     result.add_argument("--bo-num-samples", type=int, default=500, help="Additional BO candidates, in batches of five")
     result.add_argument("--k", type=int, default=5)
     result.add_argument("--skip-detection", action="store_true")
+    result.add_argument("--collision-radius-scale", type=float, default=None,
+                        help="Scoring collision radius as a fraction of the robot radius (default: the task's)")
+    result.add_argument("--no-scene-overrides", action="store_true",
+                        help="Keep the dataset's scene settings instead of matching the 3DGS capture "
+                             "(e.g. which drawer is open)")
     result.add_argument("--nav-mode", choices=("velocity", "kinematic"), default="velocity")
     result.add_argument("--policy-device", choices=("cuda", "cpu"), default="cuda")
     result.add_argument("--policy-steps", type=int, default=2000, help="Maximum learned-policy steps before timeout")
@@ -46,22 +53,34 @@ def parser():
     return result
 
 
-def make_env(metadata, args):
+def apply_task_defaults(args):
+    """Fills the task-dependent defaults into parsed arguments and returns the task."""
+    task = get_task(args.task)
+    args.checkpoint = args.checkpoint or task.default_checkpoint
+    args.dataset = args.dataset or task.default_dataset
+    if args.collision_radius_scale is None:
+        args.collision_radius_scale = task.collision_threshold_multiplier
+    return task
+
+
+def make_env(metadata, args, task, overrides=None):
     """Use the same mobile RB-Y1 scene setup as test_mobilization.py."""
     import robosuite
     import robocasa
-    from robocasa.models.fixtures import FixtureType
+    import mobipi.envs  # registers the Mobi-pi task variants (e.g. CloseDrawerLeft)
 
     kwargs = copy.deepcopy(metadata["env_kwargs"])
     layouts = kwargs.pop("layout_ids", []) or []
     kwargs.pop("style_ids", None)
-    if args.layout_id not in layouts:
-        kwargs["door_id"] = FixtureType.MICROWAVE
+    in_training_layout = args.layout_id in layouts
+    if not in_training_layout:
         kwargs.pop("force_robot_placement", None)
+    task.env_overrides(kwargs, in_training_layout)
     kwargs.update(
         base_types="RBY1MobileBase", layout_and_style_ids=[[args.layout_id, args.style_id]],
         has_renderer=args.vis, has_offscreen_renderer=True, use_camera_obs=False,
         ignore_done=True, renderer="mjviewer" if args.vis else "mujoco", render_camera=None, seed=args.seed,
+        **(overrides or {}),
     )
     return robosuite.make(metadata["env_name"], **kwargs)
 
@@ -84,6 +103,7 @@ def select_base_pose(env, args, scene_run, fixture_bounds, floor_bounds, robot_s
         config, encoder, k=args.k, object_detection_model_name="openbmb/MiniCPM-V-2",
         ply_path=str(args.scene_dir / "pc.ply"), floor_fixture_bounds_2d=floor_bounds,
         robot_size=robot_size, max_z=1.0, image_size=224, skip_detection=args.skip_detection,
+        collision_threshold_multiplier=args.collision_radius_scale,
     )
     distribution.set_obs_keys([name + "_image" for name in args.camera_names])
     distribution.set_object(env.get_object_name())
@@ -144,7 +164,7 @@ def select_base_pose(env, args, scene_run, fixture_bounds, floor_bounds, robot_s
     return initial_pose, selected_pose, distribution.k_col, float(scores.max())
 
 
-def run_policy(env, policy, seed, max_steps, vis=False, progress=None):
+def run_policy(env, policy, task, seed, max_steps, vis=False, progress=None):
     """Start a fresh policy history at the reached pose, without resetting the scene."""
     import gc
     import numpy as np
@@ -152,8 +172,6 @@ def run_policy(env, policy, seed, max_steps, vis=False, progress=None):
     import mujoco
     from robomimic.utils.rby1_cartesian import RBY1CartesianAdapter
     from robomimic.scripts.evaluate_rby1_cartesian_checkpoints import execute_loop, observation_reader
-    from robomimic.scripts.replay_rby1_cartesian import door_geometry
-    from robomimic.utils.rby1_evaluation import SUCCESS_THRESHOLD_RAD
 
     # Flush deferred cleanup from earlier simulator instances, then rebuild the
     # camera buffers. Rebinding alone cannot repair buffers invalidated by cleanup.
@@ -167,30 +185,28 @@ def run_policy(env, policy, seed, max_steps, vis=False, progress=None):
         controller.update(force=True)
         controller.reset_goal()
     adapter = RBY1CartesianAdapter(env)
-    hinge_name, hinge_address, _ = door_geometry(env, env.get_ep_meta())
-    if "microjoint" not in hinge_name or env.behavior != "close":
-        raise ValueError("This checkpoint expects the microwave-closing task")
+    task_progress = task.progress_fn(env)
     base_start = adapter.site_transform(adapter.base_site).copy()
     policy.policy.inference_noise_generator = torch.Generator(device="cpu").manual_seed(seed)
     policy.start_episode()
     started = last_frame = time.perf_counter()
-    closed_steps = 0
-    required_closed_steps = max(1, round(0.5 * env.control_freq))
+    done_steps = 0
+    required_done_steps = max(1, round(0.5 * env.control_freq))
     if progress is None:
         progress = {}
-    initial_hinge = float(env.sim.data.qpos[hinge_address])
+    initial = task_progress()
     progress.update(completed=False, success=False, steps_executed=0, max_steps=max_steps,
-                    initial_hinge_angle=initial_hinge, final_hinge_angle=initial_hinge, success_timestep=None)
+                    initial_progress=initial, final_progress=initial, success_timestep=None)
     print(f"Running up to {max_steps} policy steps ({max_steps / env.control_freq:.0f} seconds of simulation), "
-          "stopping once the door stays closed for 0.5 seconds. Viewer playback is capped at real time.", flush=True)
+          "stopping once the task stays done for 0.5 seconds. Viewer playback is capped at real time.", flush=True)
 
-    def observe(step, hinge_after, **unused):
-        nonlocal last_frame, closed_steps
-        progress.update(steps_executed=step + 1, final_hinge_angle=float(hinge_after),
-                        success=bool(hinge_after >= SUCCESS_THRESHOLD_RAD))
+    def observe(step, progress_after, **unused):
+        nonlocal last_frame, done_steps
+        progress.update(steps_executed=step + 1, final_progress=float(progress_after),
+                        success=bool(progress_after >= task.success_threshold))
         if progress["success"] and progress["success_timestep"] is None:
             progress["success_timestep"] = step + 1
-        closed_steps = closed_steps + 1 if progress["success"] else 0
+        done_steps = done_steps + 1 if progress["success"] else 0
         if vis:
             if not env.viewer.viewer.is_running():
                 raise KeyboardInterrupt
@@ -199,10 +215,10 @@ def run_policy(env, policy, seed, max_steps, vis=False, progress=None):
                 time.sleep(delay)
             last_frame = time.perf_counter()
         if (step + 1) % 100 == 0:
-            print(f"Policy step {step + 1}/{max_steps}: hinge={hinge_after:.3f} rad, "
-                  f"closed={progress['success']}, elapsed={time.perf_counter() - started:.1f}s", flush=True)
-        if closed_steps >= required_closed_steps:
-            print(f"Door closed for 0.5 seconds at policy step {step + 1}; stopping learned actions.", flush=True)
+            print(f"Policy step {step + 1}/{max_steps}: {task.progress_label}={progress_after:.3f}, "
+                  f"done={progress['success']}, elapsed={time.perf_counter() - started:.1f}s", flush=True)
+        if done_steps >= required_done_steps:
+            print(f"Task done for 0.5 seconds at policy step {step + 1}; stopping learned actions.", flush=True)
             return False
 
     native_read = observation_reader(env, adapter)
@@ -215,8 +231,9 @@ def run_policy(env, policy, seed, max_steps, vis=False, progress=None):
         mujoco.mjr_setBuffer(mujoco.mjtFramebuffer.mjFB_OFFSCREEN, context.con)
         return native_read()
 
-    result = execute_loop(policy, env, adapter, read_observation, hinge_address, max_steps, observer=observe)
-    result["closure_confirmed"] = closed_steps >= required_closed_steps
+    result = execute_loop(policy, env, adapter, read_observation, None, max_steps, observer=observe,
+                          progress_fn=task_progress, success_threshold=task.success_threshold)
+    result["closure_confirmed"] = done_steps >= required_done_steps
     result["success"] = bool(result["success"] and result["closure_confirmed"])
     if not result["closure_confirmed"] and result["failure_classification"] == "success":
         result["failure_classification"] = "closure_not_stable"
@@ -224,21 +241,19 @@ def run_policy(env, policy, seed, max_steps, vis=False, progress=None):
     return result
 
 
-def return_arm_to_start(env, home_qpos, grippers, vis=False, progress=None):
+def return_arm_to_start(env, task, home_qpos, grippers, vis=False, progress=None):
     """Use the existing joint-position servos to return the left arm smoothly."""
     import numpy as np
     from mobipi.utils import rby1_utils
-    from robomimic.scripts.replay_rby1_cartesian import door_geometry
-    from robomimic.utils.rby1_evaluation import SUCCESS_THRESHOLD_RAD
 
     controller = env.robots[0].composite_controller
     left = controller.part_controllers["left"]
     ik = controller.joint_action_policy
     if left.input_type != "absolute" or list(ik.joint_names) != list(left.joint_names):
         raise ValueError("Arm return expects the checkpoint's left-only IK and absolute joint controller")
-    _, hinge, _ = door_geometry(env, env.get_ep_meta())
-    if env.sim.data.qpos[hinge] < SUCCESS_THRESHOLD_RAD:
-        raise ValueError("Arm return requires a closed door")
+    task_progress = task.progress_fn(env)
+    if task_progress() < task.success_threshold:
+        raise ValueError("Arm return requires a completed task")
     start = env.sim.data.qpos[left.qpos_index].copy()
     home_qpos = np.asarray(home_qpos, dtype=float)
     # Cubic interpolation has peak slope 1.5; limit joint targets to 0.5 rad/s.
@@ -252,7 +267,7 @@ def return_arm_to_start(env, home_qpos, grippers, vis=False, progress=None):
     if progress is None:
         progress = {}
     progress.update(completed=False, success=False, steps_executed=0, home_qpos=home_qpos.copy(),
-                    door_stayed_closed=True, num_contact_steps=0)
+                    task_stayed_done=True, num_contact_steps=0)
 
     # Supply joint targets to the same low-level servos instead of Cartesian IK
     # during this phase. env.step still advances normal physics and base holds.
@@ -265,13 +280,13 @@ def return_arm_to_start(env, home_qpos, grippers, vis=False, progress=None):
             env.step(hold)
             if not np.isfinite(env.sim.data.qpos).all():
                 raise RuntimeError("Nonfinite simulator state during arm return")
-            angle = float(env.sim.data.qpos[hinge])
-            progress.update(steps_executed=step + 1, final_hinge_angle=angle,
+            value = task_progress()
+            progress.update(steps_executed=step + 1, final_progress=value,
                             final_qpos=env.sim.data.qpos[left.qpos_index].copy())
             progress["num_contact_steps"] += int(bool(rby1_utils.robot_env_contacts(env.sim)))
-            if angle < SUCCESS_THRESHOLD_RAD:
-                progress["door_stayed_closed"] = False
-                progress["stop_reason"] = "Door reopened during arm return"
+            if value < task.success_threshold:
+                progress["task_stayed_done"] = False
+                progress["stop_reason"] = "Task undone during arm return"
                 break
             if vis:
                 if not env.viewer.viewer.is_running():
@@ -284,58 +299,32 @@ def return_arm_to_start(env, home_qpos, grippers, vis=False, progress=None):
     progress.update(completed=True, max_joint_error_rad=error,
                     base_drift_m=float(np.linalg.norm(rby1_utils.get_base_vec(env.sim)[:2] - base_start[:2])),
                     final_contacts=rby1_utils.robot_env_contacts(env.sim))
-    progress["success"] = bool(progress["door_stayed_closed"] and error <= 0.02 and not progress["final_contacts"])
-    print(f"Arm return: max joint error={error:.4f} rad, door closed={progress['door_stayed_closed']}", flush=True)
+    progress["success"] = bool(progress["task_stayed_done"] and error <= 0.02 and not progress["final_contacts"])
+    print(f"Arm return: max joint error={error:.4f} rad, task still done={progress['task_stayed_done']}", flush=True)
     return progress
 
 
 def navigate_to_pose(env, target, collision, floor_bounds, grippers, mode):
-    """Align half a meter behind the goal before approaching the open microwave.
+    """Drive to the goal through a staging pose behind it (rby1_utils.approach_pose).
 
-    A diagonal drive directly to the goal can sweep the torso into the open
-    door. Keep the existing collision checks active on both navigation legs.
+    The robot turns to the final heading in open space and ends with a straight
+    drive in, so it does not sweep its torso into an open door or drawer. The
+    collision checks stay active on the whole drive.
     """
-    import numpy as np
     from mobipi.utils import rby1_utils
 
-    approach = np.asarray(target, dtype=float).copy()
-    approach[:2] -= 0.5 * np.array([np.cos(target[2]), np.sin(target[2])])
-    if not rby1_utils.check_path_collision(collision, approach, target, steps=100):
-        raise RuntimeError("The aligned final approach is blocked in the scene point cloud")
-    posture = rby1_utils.get_robot_joint_qpos(env)
-    legs = []
-    for goal in (approach, target):
-        navigation = rby1_utils.move_to_pose(
-            env, goal, collision, floor_bounds, render_camera=None, gripper_action=grippers, mode=mode,
-        )
-        legs.append(navigation)
-        reached = navigation["settled_vec"]
-        if (navigation["stuck"] or navigation["num_collision_steps"] or navigation["final_contacts"]
-                or np.linalg.norm(reached[:2] - goal[:2]) > 0.05
-                or abs(rby1_utils.angle_wrap(reached[2] - goal[2])) > 0.05):
-            break
-        rby1_utils.set_robot_joint_qpos(env, posture)
-        env.sim.forward()
-
-    # Keep the existing result format, with totals and trajectories for both legs.
-    navigation = legs[-1].copy()
-    navigation.update(
-        approach_pose=approach, legs_executed=len(legs),
-        used_rrt=any(leg["used_rrt"] for leg in legs),
-        stuck=any(leg["stuck"] for leg in legs),
-        num_steps=sum(leg["num_steps"] for leg in legs),
-        path_length=sum(leg["path_length"] for leg in legs),
-        num_collision_steps=sum(leg["num_collision_steps"] for leg in legs),
-        colliding_geoms=sorted({geom for leg in legs for geom in leg["colliding_geoms"]}),
-        base_vec_history=np.concatenate([leg["base_vec_history"] for leg in legs]),
-        waypoints=np.concatenate([leg["waypoints"] for leg in legs]),
+    return rby1_utils.move_to_pose(
+        env, target, collision, floor_bounds, render_camera=None, gripper_action=grippers, mode=mode,
+        use_approach=True,
     )
-    return navigation
 
 
 def main(argv=None):
     arguments = parser()
     args = arguments.parse_args(argv)
+    task = apply_task_defaults(args)
+    if not args.collision_radius_scale > 0:
+        arguments.error("collision-radius-scale must be positive")
     if (args.policy_steps < 1 or args.k < 1 or args.num_init_samples < 5
             or args.num_init_samples % 5 or args.bo_num_samples < 0 or args.bo_num_samples % 5):
         arguments.error("Use positive policy-steps/k and sample counts divisible by five (at least five initial samples)")
@@ -372,8 +361,9 @@ def main(argv=None):
                 arguments.error(f"Dataset has no RGB observations for scoring camera {camera}")
         metadata = json.loads(dataset["data"].attrs["env_args"])
         first_action = group["actions"][0].copy()
-    if metadata["env_name"] != "CloseSingleDoor" or metadata["env_kwargs"]["robots"] != "RBY1":
-        arguments.error("Expected an RB-Y1 CloseSingleDoor reference dataset")
+    if metadata["env_name"] != task.env_name or metadata["env_kwargs"]["robots"] != "RBY1":
+        arguments.error(f"Task {task.name} expects an RB-Y1 {task.env_name} reference dataset, "
+                        f"got {metadata['env_kwargs']['robots']} {metadata['env_name']}")
     if not torch.cuda.is_available():
         arguments.error("The 3DGS/DINO mobilization stage requires a CUDA-capable environment")
     torch.backends.cuda.matmul.allow_tf32 = False
@@ -387,12 +377,23 @@ def main(argv=None):
     output.mkdir(parents=True, exist_ok=False)
     checkpoint = torch.load(str(args.checkpoint), map_location="cpu", weights_only=False)
     env = None
-    result = dict(checkpoint=str(args.checkpoint), dataset=str(args.dataset), scene_dir=str(args.scene_dir),
+    result = dict(task=task.name, checkpoint=str(args.checkpoint), dataset=str(args.dataset), scene_dir=str(args.scene_dir),
                   layout_id=args.layout_id, style_id=args.style_id, seed=args.seed, success=False,
                   policy_device=args.policy_device, policy_steps=args.policy_steps, vis=args.vis,
-                  stage="environment", policy=None)
+                  collision_radius_scale=args.collision_radius_scale, stage="environment", policy=None)
     try:
-        env = make_env(metadata, args)
+        env = make_env(metadata, args, task)
+        overrides = {} if args.no_scene_overrides else task.scene_overrides(env, args.scene_dir)
+        if overrides:
+            # Fixtures are chosen when the model is loaded, so the env is rebuilt.
+            env.close()
+            env = None
+            try:
+                env = make_env(metadata, args, task, overrides)
+            except RuntimeError as error:
+                raise RuntimeError(f"{task.env_name} cannot be set up as captured in {args.scene_dir} "
+                                   f"({overrides}): {error}") from error
+        result["scene_overrides"] = overrides
         env.reset()
         fixture_bounds, floor_bounds, _, _, robot_size = get_env_map_and_default_robot_init_pose(env=env)
         default_pose = rby1_utils.get_base_vec(env.sim)
@@ -441,7 +442,7 @@ def main(argv=None):
             left = env.robots[0].composite_controller.part_controllers["left"]
             home_qpos = env.sim.data.qpos[left.qpos_index].copy()
             result["policy"] = {}
-            result["policy"] = run_policy(env, policy, args.seed, args.policy_steps, args.vis,
+            result["policy"] = run_policy(env, policy, task, args.seed, args.policy_steps, args.vis,
                                           progress=result["policy"])
             if result["policy"]["error"]:
                 raise RuntimeError(f"{result['policy']['error_stage']}: {result['policy']['error']}")
@@ -449,7 +450,7 @@ def main(argv=None):
                 result["stage"] = "arm_return"
                 print("Returning the left arm to its initial joint posture.", flush=True)
                 result["arm_return"] = {}
-                result["arm_return"] = return_arm_to_start(env, home_qpos, grippers, args.vis,
+                result["arm_return"] = return_arm_to_start(env, task, home_qpos, grippers, args.vis,
                                                           progress=result["arm_return"])
                 result["success"] = bool(result["arm_return"]["success"])
         else:
