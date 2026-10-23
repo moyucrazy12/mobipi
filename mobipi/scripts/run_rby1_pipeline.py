@@ -249,8 +249,12 @@ def return_arm_to_start(env, task, home_qpos, grippers, vis=False, progress=None
     controller = env.robots[0].composite_controller
     left = controller.part_controllers["left"]
     ik = controller.joint_action_policy
-    if left.input_type != "absolute" or list(ik.joint_names) != list(left.joint_names):
-        raise ValueError("Arm return expects the checkpoint's left-only IK and absolute joint controller")
+    ik_joints = list(ik.joint_names)
+    ik_parts = [part for part in controller.part_controllers.values()
+                if set(getattr(part, "joint_names", ())) & set(ik_joints)]
+    if (not set(left.joint_names) <= set(ik_joints)
+            or any(part.input_type != "absolute" for part in ik_parts)):
+        raise ValueError("Arm return expects IK over the left arm and absolute joint controllers")
     task_progress = task.progress_fn(env)
     if task_progress() < task.success_threshold:
         raise ValueError("Arm return requires a completed task")
@@ -264,6 +268,9 @@ def return_arm_to_start(env, task, home_qpos, grippers, vis=False, progress=None
     base_start = rby1_utils.get_base_vec(env.sim)
     original_solve = ik.solve
     target = start.copy()
+    # IK over both arms (e.g. the drawer checkpoint): hold the other joints where they are.
+    ik_target = env.sim.data.qpos[[env.sim.model.get_joint_qpos_addr(j) for j in ik_joints]].copy()
+    left_slots = [ik_joints.index(j) for j in left.joint_names]
     if progress is None:
         progress = {}
     progress.update(completed=False, success=False, steps_executed=0, home_qpos=home_qpos.copy(),
@@ -271,7 +278,11 @@ def return_arm_to_start(env, task, home_qpos, grippers, vis=False, progress=None
 
     # Supply joint targets to the same low-level servos instead of Cartesian IK
     # during this phase. env.step still advances normal physics and base holds.
-    ik.solve = lambda unused: target.copy()
+    def solve(unused):
+        ik_target[left_slots] = target
+        return ik_target.copy()
+
+    ik.solve = solve
     try:
         for step in range(move_steps + settle_steps):
             frame_start = time.perf_counter()
