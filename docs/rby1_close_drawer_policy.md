@@ -20,6 +20,8 @@ prepare_rby1_dp_dataset.py         9-D actions_eef_cmd + train / valid masks
 train.py                           Diffusion Policy (robomimic)
         |
 evaluate_rby1_rollouts.py          success rate in simulation
+        |
+run_rby1_pipeline.py --task close_drawer   mobilization + navigation + policy
 ```
 
 ## The task
@@ -186,6 +188,21 @@ MUJOCO_GL=egl python robomimic/scripts/evaluate_rby1_rollouts.py \
   success, steps and final drawer opening; > 1.0 means the drawer was pulled
   further open) and `summary.json`.
 - ~15–25 s per episode.
+
+## 9. Run the full Mobi-π pipeline
+
+Base-pose selection, navigation, the policy, and the arm return run in one
+pipeline with `--task close_drawer` (from the repository root). The task's default
+checkpoint is epoch 10 of the `look300` run:
+
+```bash
+python -m mobipi.scripts.run_rby1_pipeline --task close_drawer \
+  --scene-dir scene_data/close_drawer/layout2_style2 --layout-id 2 --style-id 2 \
+  --skip-detection --vis
+```
+
+Seed sweeps, options, and the scene layouts the drawer task can use:
+[Running the RB-Y1 full pipeline](rby1_pipeline.md).
 
 ## Replay a dataset
 
