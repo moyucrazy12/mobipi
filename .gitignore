@@ -18,3 +18,4 @@ mobipi/macros_private.py
 .vscode/
 datasets/
 mobipi/collect_demos/rby1*
+generated_datasets/
