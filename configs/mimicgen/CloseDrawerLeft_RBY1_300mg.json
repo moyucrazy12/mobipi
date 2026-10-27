@@ -1,0 +1,71 @@
+{
+    "name": "CloseDrawer",
+    "type": "robosuite",
+    "experiment": {
+        "name": "CloseDrawerLeft_RBY1_300mg",
+        "source": {
+            "dataset_path": "datasets/close_drawer_mg/source.hdf5",
+            "filter_key": null,
+            "n": null,
+            "start": null
+        },
+        "generation": {
+            "path": "generated_datasets/mimicgen",
+            "guarantee": true,
+            "keep_failed": false,
+            "num_trials": 300,
+            "select_src_per_subtask": true,
+            "transform_first_robot_pose": false,
+            "interpolate_from_last_target_pose": true
+        },
+        "task": {
+            "name": null,
+            "robot": null,
+            "gripper": null,
+            "env_meta_update_kwargs": {
+                "layout_ids": [0, 2, 3, 5, 6],
+                "style_ids": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+            },
+            "interface": null,
+            "interface_type": null
+        },
+        "max_num_failures": 1500,
+        "render_video": false,
+        "num_demo_to_render": 50,
+        "num_fail_demo_to_render": 50,
+        "log_every_n_attempts": 50,
+        "seed": 20261012
+    },
+    "obs": {
+        "collect_obs": true,
+        "camera_names": [],
+        "camera_height": 84,
+        "camera_width": 84
+    },
+    "task": {
+        "task_spec": {
+            "stage_1": {
+                "object_ref": "handle",
+                "subtask_term_signal": "stage_contact_drawer",
+                "subtask_term_offset_range": [0, 0],
+                "action_noise": 0.0,
+                "num_interpolation_steps": 15,
+                "selection_strategy": "nearest_neighbor_interpolation",
+                "selection_strategy_kwargs": {
+                    "nn_k": 5
+                }
+            },
+            "stage_2": {
+                "object_ref": "handle",
+                "subtask_term_signal": null,
+                "subtask_term_offset_range": [0, 0],
+                "action_noise": 0.0,
+                "num_interpolation_steps": 15,
+                "selection_strategy": "nearest_neighbor_interpolation",
+                "selection_strategy_kwargs": {
+                    "nn_k": 5
+                }
+            }
+        }
+    }
+}
