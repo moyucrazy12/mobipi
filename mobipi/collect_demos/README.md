@@ -1,59 +1,128 @@
-# RBY1 Microwave Door Demo Collection
+# RB-Y1 microwave source demonstrations
 
-## Microwave fix
+Run commands from the repository root:
 
-In `microwave.py`, replace the old direct `qpos` indexing:
-
-```python
-hinge_qpos = sim.data.qpos[sim.model.joint_name2id(f"{self.name}_microjoint")]
-```
-
-with:
-
-```python
-joint_name = f"{self.name}_microjoint"
-hinge_qpos = float(sim.data.get_joint_qpos(joint_name))
-```
-
-This is needed because a MuJoCo joint ID is not guaranteed to be the same as its index in the `qpos` vector. Using `get_joint_qpos()` ensures RoboCasa reads the actual microwave hinge position correctly when checking the door state and task success.
-
-## Run one microwave-closing demo
+## Run one source demo
 
 ```bash
-cd ~/mobipi_EP/mobipi/mobipi/collect_demos
-
-python auto_close_microwave_door.py \
-  --environment CloseSingleDoor \
-  --layout 1 \
-  --style 10 \
-  --robot-x 0.8 \
-  --robot-y -1.45 \
-  --push-x-direction 1 \
-  --push-lead 0.03 \
-  --keep-open \
-  --contact-z-offset 0 \
-  --steps-per-waypoint 4 \
-  --handle-clearance 0.053 \
-  --arm left
+python -m mobipi.collect_demos.auto_close_microwave_door \
+    --layout 1 --style 1 --seed 1 --initial-door-angle-deg 60 \
+     --output-dir logs/rby1_source/single60 \
+    --record-dir logs/rby1_source/single60/raw
 ```
 
-## Collect multiple successful demonstrations
+Omit `--headless` for the live simulator. The sequence is approach, sustained
+active-hand contact, hinge-following close, stable-close detection, unload,
+retreat, base-relative stow, and a short hold. 
+
+Approach and stow use reachable FK paths
+but still executes and records normal Cartesian actions, without teleporting the
+robot or overriding the low-level IK action stream.
+
+The fixed `RBY1Mount` base is placed using the selected microwave's stationary fixture frame and
+RoboCasa's placement helper, with an RB-Y1 setback. It does not face the moving
+door or move when the starting door angle changes. Optional `--base-local X Y
+YAW_DEG` sets an explicit microwave-relative base pose; the floor height is kept.
+`--spawn-offset-x/y` adjust the nominal placement. Do not force a world-X push.
+
+For layouts 2, 4, 5, and 7,move the base 7 cm closer by changing
+`--spawn-offset-y` from `-0.35` to `-0.28`. Use `--pre-lift-deg 30` for a small
+shoulder lift before the normal approach, and reuse that clearance waypoint on
+the return to stow. This raises the gripper about 10 cm in this scene. The
+waypoint uses the existing FK path and Cartesian commands. Moving closer
+without a clearance waypoint can make the lift or stow sweep through the
+stove/counter.
 
 ```bash
-cd ~/mobipi_EP/mobipi/mobipi/collect_demos
-
-python collect_close_door_demos.py \
-  --count 10 \
-  --layout 1 \
-  --arm left \
-  --robot-x 0.8 \
-  --robot-y -1.45 \
-  --push-x-direction 1 \
-  --push-lead 0.03 \
-  --steps-per-waypoint 4 \
-  --handle-clearance 0.053 \
-  --finish-angle 0.12
+python -m mobipi.collect_demos.auto_close_microwave_door \
+    --layout 4 --style 1 --seed 1 --initial-door-angle-deg 60 \
+    --spawn-offset-y -0.28 --push-radius-fraction 0.5 \
+    --pre-lift-deg 30 --direct-approach \
+    --output-dir logs/rby1_source/layout4_direct60 \
+    --record-dir logs/rby1_source/layout4_direct60/raw
 ```
+
+`--direct-approach` removes the intermediate alignment stop. After the small
+clearance lift, the TCP follows a straight reach to the pre-contact point while
+the gripper aligns, then advances gently until sustained panel contact.
+The return to stow uses the raised clearance posture.
+
+The angle-grid collector also accepts these motion/placement flags.
+`--pre-lift-deg` sets the shoulder angle between 0 and 90 degrees. The original
+`--lift-before-turn` flag still selects a 90-degree lift; an explicit
+`--pre-lift-deg` overrides it. 
+
+The optional angle is applied inside environment reset, before the recording
+wrapper caches the initial state. The microwave state reader preserves the
+negative-opening hinge convention: `hinge_qpos = -float(sim.data.get_joint_qpos(joint_name))`.
+
+## Validate the four starting angles
+
+```bash
+python -m mobipi.collect_demos.collect_close_door_demos \
+    --layouts 1 --styles 1 --angles 20 40 60 80 --seed 1 --headless \
+    --output logs/rby1_source/four_angles
+```
+
+Failure reasons distinguish `unreachable_contact`, `collision`, `lost_contact`,
+`stalled_closing`, `rebound`, `failed_release`, `failed_stow`, and setup or
+interruption failures. A sweep also reports timeout or inconsistent base poses.
+Use the logged seed and command to reproduce a failed case separately.
+
+## Collect a balanced dataset
+
+The collector chooses these fixture-side Y offsets automatically:
+
+| Layouts | Y offset |
+| --- | --- |
+| 2, 4, 5, 7 | -0.28 m |
+| 1, 3, 6, 8, 9 | -0.35 m |
+
+An explicit `--spawn-offset-y` overrides the rule for every selected layout.
+The command below uses the automatic rule, so omit the old global offset flag.
+
+```bash
+mkdir -p logs/rby1_source
+demo_run="logs/rby1_source/microwave_balanced_$(date +%Y%m%d_%H%M%S)"
+
+nohup python -u -m mobipi.collect_demos.collect_close_door_demos \
+    --count 300 --max-attempts 1500 \
+    --layouts 1 2 3 4 7 \
+    --styles 0 1 2 3 4 5 6 7 8 9 10 11 \
+    --angles 20 30 40 50 60 70 80 \
+    --push-radius-fraction 0.5 --pre-lift-deg 30 --direct-approach \
+    --headless --output "$demo_run" \
+    > "${demo_run}.log" 2>&1 < /dev/null &
+
+echo "PID: $! | Results: $demo_run | Log: ${demo_run}.log"
+```
+
+`--count 300` targets 300 complete successes, reserving 60 per selected layout.
+Attempts interleave layouts, explore new layout/style/angle combinations, and
+favor underrepresented successful styles and angles. Style/angle balance is
+best effort: an unreachable condition cannot supply a valid demonstration.
+`stats.json` reports the actual saved distribution, layout shortfalls, and cases
+that exhausted their retry limit. The run does not fill one layout's quota with
+extra demonstrations from an easier layout.
+
+`collection_config.json` records the Python executable, motion arguments,
+placement rules, sampler seed, and source hashes. `--dry-run` prints the settings
+without creating files or launching simulations. This collector records source
+demos; it does not launch MimicGen, render a training image dataset, or train.
+
+To export only successful recordings to a small source HDF5 (states/actions,
+without running MimicGen or collecting RGB observations):
+
+```bash
+python mobipi/collect_demos/gather_demos_hdf5.py \
+    --input logs/rby1_source/four_angles \
+    --output logs/rby1_source/four_angle_sources.hdf5 \
+    --environment CloseSingleDoor
+```
+
+The 31-D source action layout is retained. Requested opening angles are captured
+in the raw initial states and retained as per-demo metadata in the HDF5.
+
 # RBY1 Drawer Demo Collection
 
 The full pipeline from these demos to a trained and evaluated policy is in
