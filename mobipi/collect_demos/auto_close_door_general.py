@@ -13,13 +13,9 @@ from robosuite.controllers import load_composite_controller_config
 from robosuite.controllers.composite.composite_controller import WholeBody
 from robosuite.wrappers import DataCollectionWrapper
 
-try:
-    from robocasa.utils.env_utils import compute_robot_base_placement_pose
-except Exception:
-    compute_robot_base_placement_pose = None
-
-
 from pathlib import Path
+import time
+from robocasa.models.fixtures import FixtureType
 
 DEFAULT_CONTROLLER = str(
     Path(robosuite.__file__).resolve().parent
@@ -499,6 +495,7 @@ def make_config(args, controller_config, renderer, forced_placement=None):
     config = {
         "env_name": args.environment,
         "robots": "RBY1",
+        "base_types": "RBY1Mount",
         "controller_configs": controller_config,
         "layout_ids": [args.layout],
         "style_ids": [args.style],
@@ -514,6 +511,10 @@ def make_config(args, controller_config, renderer, forced_placement=None):
         "randomize_base_init_pose": None,
         "randomize_cameras": False,
         "seed": args.seed,
+        "door_id": FixtureType.MICROWAVE,
+        "initial_door_angle_deg": args.initial_door_angle_deg,
+        # Start off the straight-elbow singularity; this is also the stow goal.
+        "initial_arm_qpos": {args.arm: [0, 0, 0, -0.7, 0, 0.7, 0]},
     }
     if forced_placement is not None:
         pos, ori = forced_placement
@@ -523,9 +524,11 @@ def make_config(args, controller_config, renderer, forced_placement=None):
 
 def create_env(args, controller_config, renderer, forced_placement=None, record=False):
     np.random.seed(args.seed)
-    env = robosuite.make(**make_config(args, controller_config, renderer, forced_placement))
+    config = make_config(args, controller_config, renderer, forced_placement)
+    env = robosuite.make(**config)
     if record and args.record_dir:
         os.makedirs(args.record_dir, exist_ok=True)
+        (Path(args.record_dir) / "env_kwargs.json").write_text(json.dumps(config, indent=2) + "\n")
         env = DataCollectionWrapper(env, args.record_dir)
         print("Recording raw trajectory to:", args.record_dir)
     np.random.seed(args.seed)
@@ -552,33 +555,17 @@ def compute_spawn_pose(base_env, fxtr, push_point, tangent, args):
             np.array([0.0, 0.0, args.robot_yaw], dtype=float),
         )
 
-    official = None
-    if compute_robot_base_placement_pose is not None:
-        try:
-            official = compute_robot_base_placement_pose(
-                base_env, fxtr, offset=[args.spawn_offset_x, args.spawn_offset_y]
-            )
-            official = (
-                np.asarray(official[0], dtype=float),
-                np.asarray(official[1], dtype=float),
-            )
-            print("\nRoboCasa base suggestion:", np.round(official[0], 3), np.round(official[1], 3))
-        except Exception as e:
-            print("RoboCasa base-placement helper failed:", e)
-
-    # Preferred general solution: trust RoboCasa fixture-relative placement
-    if args.spawn_mode in ("robocasa", "hybrid") and official is not None:
-        pos, ori = official
-        pos = pos.copy()
-        ori = ori.copy()
-
-        if args.face_push_point:
-            ori[2] = np.arctan2(
-                push_point[1] - pos[1],
-                push_point[0] - pos[0],
-            )
-
-        return pos, ori
+    if args.spawn_mode in ("fixture", "robocasa", "hybrid"):
+        fixture = fixture_pose(base_env, fxtr)
+        pos, ori = base_env.compute_robot_base_placement_pose(
+            fxtr, offset=[args.spawn_offset_x, args.spawn_offset_y])
+        if args.base_local is not None:
+            local = make_T([*args.base_local[:2], 0], Rotation.from_euler("z", np.deg2rad(args.base_local[2])).as_matrix())
+            world = fixture @ local
+            pos[:2] = world[:2, 3]
+            ori[2] = np.arctan2(world[1, 0], world[0, 0])
+        # Base Z comes from the floor / robot mount, independent of fixture height.
+        return np.asarray(pos), np.asarray(ori)
 
     # Geometry fallback only if RoboCasa placement is unavailable
     tangent_xy = np.asarray(tangent[:2], dtype=float)
@@ -600,6 +587,11 @@ def compute_spawn_pose(base_env, fxtr, push_point, tangent, args):
         np.array([base_xy[0], base_xy[1], args.robot_z]),
         np.array([0.0, 0.0, yaw]),
     )
+
+
+def fixture_pose(env, fixture):
+    body = env.sim.model.body_name2id(fixture.root_body)
+    return make_T(env.sim.data.body_xpos[body].copy(), env.sim.data.body_xmat[body].reshape(3, 3).copy())
 
 
 def probe_scene(args, controller_config):
@@ -636,316 +628,111 @@ def probe_scene(args, controller_config):
 # -----------------------------------------------------------------------------
 
 def run(args):
+    try:
+        from .door_motion import DoorMotion, DemoFailure
+    except ImportError:
+        from door_motion import DoorMotion, DemoFailure
+    output = Path(args.output_dir or args.record_dir or f"logs/rby1_source/run_{time.time_ns()}").expanduser().resolve()
+    output.mkdir(parents=True, exist_ok=True)
     controller_path = args.controller_left if args.arm == "left" and args.controller_left else args.controller
     controller_path = args.controller_right if args.arm == "right" and args.controller_right else controller_path
     controller_config = load_composite_controller_config(controller=controller_path, robot="RBY1")
+    # Keep the other arm in its absolute joint hold, matching the Cartesian policy datasets.
+    ik_config = controller_config["composite_controller_specific_configs"]
+    ik_config["actuation_part_names"] = [args.arm]
+    # Preserve the saved 31-D source action layout, including both reference
+    # sites. Only the selected arm's joints participate in IK.
+    result = dict(success=False, layout=args.layout, style=args.style, seed=args.seed,
+                  initial_door_angle_deg=args.initial_door_angle_deg, failure_reason=None,
+                  event_indexing="0-based post-action trace rows; raw states include the initial state at index 0",
+                  parameters=vars(args).copy())
+    env = motion = None
+    try:
+        spawn_pos, spawn_ori, signature = probe_scene(args, controller_config)
+        result.update(base_position=spawn_pos.tolist(), base_orientation=spawn_ori.tolist())
+        if args.probe_only:
+            result["success"] = True
+            return True
+        env = create_env(args, controller_config, renderer=not args.headless,
+                         forced_placement=(spawn_pos, spawn_ori), record=True)
+        base_env = unwrap_env(env)
+        robot = base_env.robots[0]
+        set_ik_q0_from_current_pose(base_env, robot)
+        fixture = discover_target_fixture(base_env)
+        fixture_world = fixture_pose(base_env, fixture)
+        if fixture.name != signature["fixture"]:
+            raise DemoFailure("setup_error", "Probe and recorded environment selected different fixtures")
+        base_world = make_T(spawn_pos, Rotation.from_euler("xyz", spawn_ori).as_matrix())
+        result.update(fixture=fixture.name, base_in_fixture=(np.linalg.inv(fixture_world) @ base_world).tolist())
+        hinge, hinge_name, theta_start, theta_closed, anchor, axis = discover_hinge(base_env, fixture)
+        if abs(theta_closed) > 1e-6:
+            raise DemoFailure("setup_error", "Microwave controller expects a zero closed angle")
+        result.update(hinge=hinge_name, actual_initial_angle_deg=float(-np.rad2deg(theta_start)))
+        if abs(-np.rad2deg(theta_start) - args.initial_door_angle_deg) > 0.5:
+            raise DemoFailure("initial_angle_mismatch", "Requested door angle changed during reset; check base/door clearance")
+        point, _, door_bodies, _ = discover_door_push_point(base_env, hinge, anchor, axis,
+                                                         args.push_radius_fraction, args.push_height_fraction)
+        active = args.arm
+        inactive = other_arm(active)
+        start_p, start_r = site_pose(base_env.sim, arm_site(active))
+        wrist_p, wrist_r = site_pose(base_env.sim, arm_wrist_site(active))
+        tcp_wrist = np.linalg.inv(make_T(start_p, start_r)) @ make_T(wrist_p, wrist_r)
+        inactive_p, inactive_r = site_pose(base_env.sim, arm_site(inactive))
+        inactive_wp, inactive_wr = site_pose(base_env.sim, arm_wrist_site(inactive))
+        inactive_transform = np.linalg.inv(make_T(inactive_p, inactive_r)) @ make_T(inactive_wp, inactive_wr)
+        inactive_target = tcp_to_wrist_target(inactive_p, inactive_r, inactive_transform)
+        inactive_q = np.array([base_env.sim.data.get_joint_qpos(n) for n in arm_joint_names(inactive)])
+        base_site = robot.robot_model.base.correct_naming("center")
 
-    if args.spawn_mode == "fixed":
-        spawn_pos = np.array([args.robot_x, args.robot_y, args.robot_z], dtype=float)
-        spawn_ori = np.array([0.0, 0.0, args.robot_yaw], dtype=float)
-        probe_signature = None
-    else:
-        spawn_pos, spawn_ori, probe_signature = probe_scene(args, controller_config)
+        def base_pose():
+            return make_T(*site_pose(base_env.sim, base_site))
 
-    if args.probe_only:
-        print("\nProbe complete; not executing the manipulation.")
+        def command(p, r):
+            execute_target(env, base_env, robot, active, p, r, inactive_q,
+                           inactive_target, tcp_wrist, args.gripper)
+
+        motion = DoorMotion(base_env, command, lambda: site_pose(base_env.sim, arm_site(active)),
+                            base_pose, hinge, point, args)
+        motion.run(lambda tangent: door_facing_rotation(axis, tangent, tcp_wrist))
+        result.update(success=True, final_angle_deg=float(-np.rad2deg(motion.angle)))
         return True
-
-    env = create_env(
-        args, controller_config, renderer=True,
-        forced_placement=(spawn_pos, spawn_ori), record=True,
-    )
-    base_env = unwrap_env(env)
-    robot = base_env.robots[0]
-    set_ik_q0_from_current_pose(base_env, robot)
-
-    fxtr = discover_target_fixture(base_env)
-    hinge_id, hinge_name, theta_start, theta_closed, hinge_pos, hinge_axis = discover_hinge(base_env, fxtr)
-    delta_total = theta_closed - theta_start
-    if abs(delta_total) < 1e-4:
-        raise RuntimeError("Door is already essentially closed.")
-    direction_sign = np.sign(delta_total)
-
-    door_push_start, radial_dir, door_body_ids, door_geom_ids = discover_door_push_point(
-        base_env, hinge_id, hinge_pos, hinge_axis,
-        args.push_radius_fraction, args.push_height_fraction,
-    )
-
-    if probe_signature is not None:
-        mismatch = float(np.linalg.norm(door_push_start - probe_signature["push_point"]))
-        if mismatch > args.max_probe_mismatch:
-            raise RuntimeError(
-                f"Probe/final scene mismatch is {mismatch:.3f} m. "
-                "The base pose was computed for a different sampled scene; rerun with the same seed or increase --max-probe-mismatch only if this is expected."
-            )
-
-    tangent0 = closing_tangent(hinge_pos, hinge_axis, door_push_start, direction_sign)
-    tangent0 = force_tangent_direction(tangent0, args.push_x_direction)
-    if np.linalg.norm(tangent0[:2]) < 0.20:
-        raise RuntimeError("Selected door hinge produces a mostly vertical push. This script currently supports floor-based pushing of mostly vertical door hinges.")
-
-    active_arm = args.arm
-    inactive_arm = other_arm(active_arm)
-    active_site, active_wrist_site = arm_site(active_arm), arm_wrist_site(active_arm)
-    inactive_site, inactive_wrist_site = arm_site(inactive_arm), arm_wrist_site(inactive_arm)
-
-    active_start_pos, active_start_rot = site_pose(base_env.sim, active_site)
-    active_wrist_pos, active_wrist_rot = site_pose(base_env.sim, active_wrist_site)
-    inactive_start_pos, inactive_start_rot = site_pose(base_env.sim, inactive_site)
-    inactive_wrist_pos, inactive_wrist_rot = site_pose(base_env.sim, inactive_wrist_site)
-
-    T_active_tcp_wrist = np.linalg.inv(make_T(active_start_pos, active_start_rot)) @ make_T(active_wrist_pos, active_wrist_rot)
-    T_inactive_tcp_wrist = np.linalg.inv(make_T(inactive_start_pos, inactive_start_rot)) @ make_T(inactive_wrist_pos, inactive_wrist_rot)
-    inactive_hold_q = np.array([float(base_env.sim.data.get_joint_qpos(name)) for name in arm_joint_names(inactive_arm)])
-    inactive_hold_target = tcp_to_wrist_target(inactive_start_pos, inactive_start_rot, T_inactive_tcp_wrist)
-
-    print("\n===== Generalized setup =====")
-    print("layout/style/seed:", args.layout, args.style, args.seed)
-    print("fixture:          ", getattr(fxtr, "name", None), type(fxtr).__name__)
-    print("active arm:       ", active_arm)
-    print("inactive arm:     ", inactive_arm)
-    print("controller:       ", controller_path)
-    print("base pose:        ", np.round(spawn_pos, 4), np.round(spawn_ori, 4))
-    print("push point:       ", np.round(door_push_start, 4))
-    print("closing tangent:  ", np.round(tangent0, 4))
-
-    contact_rot = door_facing_rotation(hinge_axis, tangent0, T_active_tcp_wrist)
-    pre_contact = door_push_start - (args.standoff + args.contact_clearance) * tangent0
-    far_pre_contact = door_push_start - (args.standoff + args.contact_clearance + args.extra_approach_clearance) * tangent0
-    lift_pose = far_pre_contact.copy()
-    lift_pose[2] = door_push_start[2] + args.via_z
-    pre_contact_high = pre_contact.copy()
-    pre_contact_high[2] = lift_pose[2]
-
-    trajectory = []
-    points = lerp_points(active_start_pos, far_pre_contact, args.approach_points // 3)
-    for i, p in enumerate(points):
-        t = i / max(len(points) - 1, 1)
-        trajectory.append((p, interpolate_rotation(active_start_rot, contact_rot, t)))
-    for p in lerp_points(far_pre_contact, lift_pose, args.approach_points // 3):
-        trajectory.append((p, contact_rot))
-    for p in lerp_points(lift_pose, pre_contact_high, args.approach_points // 3):
-        trajectory.append((p, contact_rot))
-    for p in lerp_points(pre_contact_high, pre_contact, args.approach_points // 4):
-        trajectory.append((p, contact_rot))
-
-    print("\n===== Executing approach =====")
-    print("waypoints:", len(trajectory))
-    for _ in range(args.settle_steps):
-        execute_target(
-            env, base_env, robot, active_arm,
-            active_start_pos, active_start_rot,
-            inactive_hold_q, inactive_hold_target,
-            T_active_tcp_wrist, args.gripper,
-        )
-
-    last_target, last_rot = active_start_pos.copy(), active_start_rot.copy()
-    for i, (target, target_rot) in enumerate(trajectory):
-        actual, err = execute_target(
-            env, base_env, robot, active_arm,
-            target, target_rot, inactive_hold_q, inactive_hold_target,
-            T_active_tcp_wrist, args.gripper, repeats=args.steps_per_waypoint,
-        )
-        last_target, last_rot = target.copy(), target_rot.copy()
-        if i % 10 == 0:
-            print(f"approach {i:3d}/{len(trajectory):3d} target={np.round(target,3)} actual={np.round(actual,3)} err={err:.3f}")
-
-    m, d = raw_model(base_env.sim), raw_data(base_env.sim)
-    door_qadr = int(m.jnt_qposadr[hinge_id])
-
-    print("\n===== Aligning with door surface =====")
-    for step in range(100):
-        actual, err = execute_target(
-            env, base_env, robot, active_arm,
-            pre_contact, contact_rot, inactive_hold_q, inactive_hold_target,
-            T_active_tcp_wrist, args.gripper,
-        )
-        _, actual_rot = site_pose(base_env.sim, active_site)
-        ang_err = rotation_error(actual_rot, contact_rot)
-        if step % 10 == 0:
-            print(f"align {step:3d} pos_err={err:.3f} rot_err={np.degrees(ang_err):.1f} deg")
-        if err < args.align_position_tolerance and ang_err < np.deg2rad(args.align_angle_tolerance_deg):
-            break
-
-    print("\n===== Acquiring physical DOOR contact =====")
-    clearance = args.contact_clearance
-    contact_found = False
-    for step in range(args.contact_search_steps):
-        theta = float(d.qpos[door_qadr])
-        remaining = theta_closed - theta
-        push_point = door_point(hinge_pos, hinge_axis, door_push_start, theta, theta_start)
-        tangent = closing_tangent(hinge_pos, hinge_axis, push_point, np.sign(remaining))
-        tangent = force_tangent_direction(tangent, args.push_x_direction)
-        target_rot = door_facing_rotation(hinge_axis, tangent, T_active_tcp_wrist)
-        target = push_point - clearance * tangent
-        target[2] += args.contact_z_offset
-
-        actual, err = execute_target(
-            env, base_env, robot, active_arm,
-            target, target_rot, inactive_hold_q, inactive_hold_target,
-            T_active_tcp_wrist, args.gripper, repeats=2,
-        )
-        contacts = door_surface_contacts(base_env, door_body_ids, push_point, args.contact_radius)
-
-        if step % 5 == 0:
-            print(
-                f"surface-search {step:3d} clearance={clearance:.3f} "
-                f"target={np.round(target,3)} actual={np.round(actual,3)} err={err:.3f} contacts={contacts[:3]}"
-            )
-
-        if contacts:
-            contact_tcp_pos, push_rot_ref = site_pose(base_env.sim, active_site)
-            theta_contact_ref = float(d.qpos[door_qadr])
-            surface_offset_ref = contact_tcp_pos - push_point
-            print("\nDOOR CONTACT at clearance:", clearance)
-            print("contacts:", contacts[:5])
-            print("contact TCP:", np.round(contact_tcp_pos, 3))
-            print("surface offset:", np.round(surface_offset_ref, 3))
-            print("contact door angle:", theta_contact_ref)
-            contact_found = True
-            break
-
-        if step > 0 and step % args.contact_search_interval == 0:
-            clearance = max(clearance - args.contact_search_step, -args.max_contact_penetration)
-
-    if not contact_found:
-        raise RuntimeError("Could not establish physical contact with the selected door surface.")
-
-    print("\n===== Closed-loop surface pushing =====")
-    success = False
-    finish_rot = None
-    theta_progress_ref = float(d.qpos[door_qadr])
-    lost_contact_steps = 0
-
-    for step in range(args.max_push_steps):
-        theta = float(d.qpos[door_qadr])
-        remaining = theta_closed - theta
-        if abs(remaining) < args.close_tolerance or base_env._check_success():
-            print("\nSUCCESS predicate / closed angle reached.")
-            success = True
-            break
-
-        finish_mode = abs(remaining) < args.finish_angle
-        push_point = door_point(hinge_pos, hinge_axis, door_push_start, theta, theta_start)
-        tangent = closing_tangent(hinge_pos, hinge_axis, push_point, np.sign(remaining))
-        tangent = force_tangent_direction(tangent, args.push_x_direction)
-        tcp_now, rot_now = site_pose(base_env.sim, active_site)
-
-        if finish_mode and finish_rot is None:
-            finish_rot = rot_now.copy()
-            print("\nEntering finish mode: holding current reachable orientation.")
-
-        target_rot = finish_rot if finish_mode else door_facing_rotation(
-            hinge_axis, tangent, T_active_tcp_wrist
-        )
-
-        door_delta = theta - theta_contact_ref
-        Rdoor = Rotation.from_rotvec(hinge_axis * door_delta).as_matrix()
-        desired_surface_offset = Rdoor @ surface_offset_ref
-        surface_goal = push_point + desired_surface_offset
-        surface_error = surface_goal - tcp_now
-
-        surface_correction = surface_error - np.dot(surface_error, tangent) * tangent
-        corr_norm = np.linalg.norm(surface_correction)
-        if corr_norm > args.max_surface_correction:
-            surface_correction *= args.max_surface_correction / corr_norm
-
-        normal_error = float(np.dot(surface_error, tangent))
-        normal_command = float(np.clip(normal_error + args.push_lead, 0.0, args.max_normal_command))
-        target = tcp_now + surface_correction + normal_command * tangent
-
-        actual, err = execute_target(
-            env, base_env, robot, active_arm,
-            target, target_rot, inactive_hold_q, inactive_hold_target,
-            T_active_tcp_wrist, args.gripper,
-        )
-
-        theta_after = float(d.qpos[door_qadr])
-        push_point_after = door_point(hinge_pos, hinge_axis, door_push_start, theta_after, theta_start)
-        contacts = door_surface_contacts(base_env, door_body_ids)
-        in_contact = bool(contacts)
-        lost_contact_steps = 0 if in_contact else lost_contact_steps + 1
-        tangential_error = float(np.dot(target - actual, tangent))
-
-        if step > 0 and step % args.progress_window == 0:
-            progress = abs(theta_after - theta_progress_ref)
-            print(f"{args.progress_window}-step door progress={progress:.4f} rad")
-            theta_progress_ref = theta_after
-
-        if step % 10 == 0:
-            actual_surface_offset = actual - push_point_after
-            mode = "door-contact" if in_contact else "free-push"
-            print(
-                f"push {step:4d} door={theta_after:.3f} remaining={theta_closed-theta_after:.3f} "
-                f"normal_cmd={normal_command:.4f} tan_err={tangential_error:.3f} err={err:.3f} "
-                f"contact={in_contact} mode={mode} finish={finish_mode} lost={lost_contact_steps}"
-            )
-            print(
-                "   surface_offset=", np.round(actual_surface_offset, 3),
-                "target=", np.round(target, 3), "actual=", np.round(actual, 3),
-            )
-
-        last_target, last_rot = target.copy(), target_rot.copy()
-
-    print("\n===== Result =====")
-    final_success = bool(base_env._check_success())
-    final_angle = float(d.qpos[door_qadr])
-    print("success:", final_success)
-    print("door final angle:", final_angle)
-    print("door target angle:", float(theta_closed))
-
-    metadata = {
-        "layout": args.layout,
-        "style": args.style,
-        "seed": args.seed,
-        "fixture_name": str(getattr(fxtr, "name", "")),
-        "fixture_type": type(fxtr).__name__,
-        "hinge_name": hinge_name,
-        "active_arm": active_arm,
-        "controller": controller_path,
-        "spawn_mode": args.spawn_mode,
-        "robot_base_position": np.asarray(spawn_pos).tolist(),
-        "robot_base_orientation": np.asarray(spawn_ori).tolist(),
-        "door_push_start": np.asarray(door_push_start).tolist(),
-        "push_radius_fraction": args.push_radius_fraction,
-        "push_height_fraction": args.push_height_fraction,
-        "push_lead": args.push_lead,
-        "success": final_success,
-        "door_final_angle": final_angle,
-        "door_target_angle": float(theta_closed),
-    }
-
-    if args.record_dir:
-        metadata_dir = getattr(env, "ep_directory", None) or args.record_dir
-        try:
-            with open(os.path.join(metadata_dir, "generalized_close_metadata.json"), "w") as f:
-                json.dump(metadata, f, indent=2)
-            print("metadata:", os.path.join(metadata_dir, "generalized_close_metadata.json"))
-        except Exception as e:
-            print("Could not save metadata:", e)
-
-    if args.keep_open:
-        print("\nPress Ctrl+C to finish.")
-        try:
-            while True:
-                execute_target(
-                    env, base_env, robot, active_arm,
-                    last_target, last_rot, inactive_hold_q, inactive_hold_target,
-                    T_active_tcp_wrist, args.gripper,
-                )
-        except KeyboardInterrupt:
-            pass
-
-    env.close()
-    return success or final_success
+    except DemoFailure as error:
+        result.update(failure_reason=error.reason, detail=str(error))
+        return False
+    except KeyboardInterrupt:
+        result.update(failure_reason="interrupted", detail="Source collection interrupted")
+        return False
+    except Exception as error:
+        result.update(failure_reason="setup_error", detail=f"{type(error).__name__}: {error}")
+        return False
+    finally:
+        if motion is not None:
+            motion.save_trace(output / "trace.npz")
+            result.update(events=motion.events, steps=len(motion.trace), phase=motion.phase,
+                          final_angle_deg=float(-np.rad2deg(motion.angle)), stow_base=motion.home.tolist())
+            if motion.trace:
+                home = motion.base_pose() @ motion.home
+                position, rotation = motion.tcp_pose()
+                result.update(final_stow_position_error_m=float(np.linalg.norm(position-home[:3, 3])),
+                              final_stow_rotation_error_deg=float(np.rad2deg(rotation_error(rotation, home[:3, :3]))),
+                              max_tracking_error_m=max(row["tracking_error"] for row in motion.trace))
+                result["base_drift_m"] = max(float(np.linalg.norm(row["base"][:3, 3]-motion.initial_base[:3, 3]))
+                                             for row in motion.trace)
+        if env is not None:
+            if args.record_dir:
+                result["raw_demo"] = getattr(env, "ep_directory", None)
+            env.close()
+        (output / "result.json").write_text(json.dumps(result, indent=2) + "\n")
+        print(json.dumps(result, indent=2), flush=True)
+        print(f"Source result: {output}", flush=True)
 
 
 # -----------------------------------------------------------------------------
 # CLI
 # -----------------------------------------------------------------------------
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+def parser():
+    parser = argparse.ArgumentParser(description="RB-Y1 microwave source demos with hinge-following and release/stow")
     parser.add_argument("--environment", default="CloseSingleDoor")
     parser.add_argument("--layout", type=int, default=1)
     parser.add_argument("--style", type=int, default=1)
@@ -956,17 +743,15 @@ if __name__ == "__main__":
     parser.add_argument("--controller-left", default=None, help="Optional controller override when --arm left")
     parser.add_argument("--controller-right", default=None, help="Optional controller override when --arm right")
 
-    parser.add_argument("--spawn-mode", choices=["hybrid", "robocasa", "door", "fixed"], default="hybrid")
+    parser.add_argument("--spawn-mode", choices=["fixture", "hybrid", "robocasa", "door", "fixed"], default="fixture")
     parser.add_argument("--spawn-distance", type=float, default=0.50, help="Robot-base distance from the open-door push point [m]")
     parser.add_argument("--spawn-lateral", type=float, default=0.0, help="Lateral base offset around the push point [m]")
     parser.add_argument("--spawn-offset-x", type=float, default=0.0, help="Offset passed to RoboCasa base-placement helper")
-    parser.add_argument("--spawn-offset-y", type=float, default=0.0, help="Offset passed to RoboCasa base-placement helper")
-    parser.add_argument("--face-push-point", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--robot-x", type=float, default=0.55)
-    parser.add_argument("--robot-y", type=float, default=-1.95)
+    parser.add_argument("--spawn-offset-y", type=float, default=-0.35, help="Fixture-side setback for the RB-Y1 footprint [m]")
+    parser.add_argument("--robot-x", type=float, default=None)
+    parser.add_argument("--robot-y", type=float, default=None)
     parser.add_argument("--robot-z", type=float, default=0.0)
-    parser.add_argument("--robot-yaw", type=float, default=np.pi / 2)
-    parser.add_argument("--max-probe-mismatch", type=float, default=0.05)
+    parser.add_argument("--robot-yaw", type=float, default=None)
     parser.add_argument("--probe-only", action="store_true")
 
     parser.add_argument("--push-radius-fraction", type=float, default=0.72, help="Radial location on door panel, 0=hinge and 1=outer edge")
@@ -974,33 +759,66 @@ if __name__ == "__main__":
     parser.add_argument("--push-x-direction", type=int, choices=[-1, 0, 1], default=0, help="Normally leave at 0; world-X override only for debugging")
 
     parser.add_argument("--control-freq", type=int, default=20)
-    parser.add_argument("--standoff", type=float, default=0.10)
-    parser.add_argument("--extra-approach-clearance", type=float, default=0.10)
-    parser.add_argument("--via-z", type=float, default=0.12)
-    parser.add_argument("--approach-points", type=int, default=80)
-    parser.add_argument("--steps-per-waypoint", type=int, default=2)
-    parser.add_argument("--settle-steps", type=int, default=10)
+    parser.add_argument("--standoff", type=float, default=0.0)
     parser.add_argument("--gripper", type=float, default=1.0)
 
     parser.add_argument("--contact-clearance", "--handle-clearance", dest="contact_clearance", type=float, default=0.053)
     parser.add_argument("--contact-z-offset", type=float, default=0.0)
-    parser.add_argument("--contact-radius", "--near-handle-contact-radius", dest="contact_radius", type=float, default=0.12)
     parser.add_argument("--contact-search-steps", type=int, default=500)
-    parser.add_argument("--contact-search-interval", type=int, default=4)
     parser.add_argument("--contact-search-step", type=float, default=0.002)
     parser.add_argument("--max-contact-penetration", type=float, default=0.060)
-    parser.add_argument("--align-position-tolerance", type=float, default=0.05)
-    parser.add_argument("--align-angle-tolerance-deg", type=float, default=8.0)
 
-    parser.add_argument("--push-lead", type=float, default=0.010, help="Persistent normal penetration into the door surface [m]")
-    parser.add_argument("--max-normal-command", type=float, default=0.030, help="Maximum one-step normal target offset [m]")
-    parser.add_argument("--max-surface-correction", type=float, default=0.002, help="Maximum lateral anti-slide correction per control step [m]")
+    parser.add_argument("--push-lead", type=float, default=0.010, help="Maximum arc-length closing lead, tapered near closure [m]")
+    parser.add_argument("--max-contact-relief", "--max-normal-command", dest="max_normal_command", type=float,
+                        default=0.010, help="Maximum unloading offset during brief contact loss; sustained loss fails [m]")
     parser.add_argument("--finish-angle", type=float, default=0.12)
     parser.add_argument("--close-tolerance", type=float, default=0.020)
-    parser.add_argument("--progress-window", type=int, default=10)
     parser.add_argument("--max-push-steps", type=int, default=5000)
 
     parser.add_argument("--record-dir", default=None)
     parser.add_argument("--keep-open", action="store_true")
-    args = parser.parse_args()
-    run(args)
+    parser.add_argument("--initial-door-angle-deg", type=float, default=60)
+    parser.add_argument("--base-local", nargs=3, type=float, metavar=("X", "Y", "YAW_DEG"),
+                        help="Base XY/yaw in the stationary microwave frame; floor height is retained")
+    parser.add_argument("--headless", action="store_true")
+    parser.add_argument("--output-dir", default=None, help="Result JSON and trace directory")
+    parser.add_argument("--tcp-speed", type=float, default=0.10)
+    parser.add_argument("--lift-before-turn", action="store_true",
+                        help="Use a 90-degree shoulder pre-lift; --pre-lift-deg selects a smaller lift")
+    parser.add_argument("--pre-lift-deg", type=float, default=None,
+                        help="Shoulder pre-lift angle [0, 90] before the normal approach; also used during stow")
+    parser.add_argument("--direct-approach", action="store_true",
+                        help="Reach the pre-contact point along a straight TCP path while aligning")
+    parser.add_argument("--orientation-speed-deg", type=float, default=15)
+    parser.add_argument("--orientation-follow", type=float, default=0.6)
+    parser.add_argument("--max-orientation-deg", type=float, default=45)
+    parser.add_argument("--max-slide", type=float, default=0.08)
+    parser.add_argument("--closed-dwell", type=float, default=0.5)
+    parser.add_argument("--retreat-distance", type=float, default=0.15)
+    parser.add_argument("--hold-seconds", type=float, default=0.75)
+    return parser
+
+
+def main():
+    options = parser()
+    args = options.parse_args()
+    if not 0 < args.initial_door_angle_deg <= 90:
+        options.error("Use an initial door angle between 0 and 90 degrees (exclusive of zero)")
+    if args.pre_lift_deg is not None and not 0 <= args.pre_lift_deg <= 90:
+        options.error("Use --pre-lift-deg between 0 and 90 degrees")
+    if args.push_x_direction:
+        options.error("World-X forcing is incompatible with the door-relative source controller")
+    if args.keep_open:
+        options.error("Use the recorded final hold; --keep-open would append unlabelled actions")
+    if args.spawn_mode == "fixed" and any(value is None for value in (args.robot_x, args.robot_y, args.robot_yaw)):
+        options.error("Fixed placement requires explicit --robot-x, --robot-y, and --robot-yaw")
+    if any(value <= 0 for value in (args.tcp_speed, args.orientation_speed_deg, args.closed_dwell,
+                                    args.hold_seconds, args.push_lead, args.finish_angle, args.close_tolerance)):
+        options.error("Motion rates, dwell times, lead, and tolerances must be positive")
+    if not 0 <= args.orientation_follow <= 1 or min(args.max_slide, args.max_orientation_deg, args.max_normal_command) < 0:
+        options.error("Use orientation-follow in [0, 1] and nonnegative slide/orientation bounds")
+    raise SystemExit(0 if run(args) else 2)
+
+
+if __name__ == "__main__":
+    main()
