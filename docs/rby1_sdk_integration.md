@@ -58,12 +58,35 @@ pip install --no-deps --force-reinstall "gsplat==1.4.0+pt22cu121" \
 #    It extracts to SCENE_MODEL_ROOT_DIR (macros/scene_data/ with our macros_private.py).
 python mobipi/scripts/download_scene_models.py
 
-# 5. The simulator (A v1.2 matches rby1a_1.2.xml in RoboSuite). Without --rm the
+# 5. The simulator (A v1.2 matches rby1a_1.2.xml in RoboSuite), with the patched
+#    base collision file mounted over Rainbow's (see below). Without --rm the
 #    controller log survives a crash: docker logs rby1-sim
 xhost +local:docker
 docker run -d --name rby1-sim --net=host -e DISPLAY=$DISPLAY \
-    -v /tmp/.X11-unix:/tmp/.X11-unix:rw rainbowroboticsofficial/rby1-sim:0.10.6-a_v1.2
+    -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
+    -v $PWD/assets/rby1_sim/base_geoms_frictionless.xml:/root/exe/app/models/rby1a/mujoco/assets/base/geoms.xml:ro \
+    rainbowroboticsofficial/rby1-sim:0.10.6-a_v1.2
 ```
+
+**Why the simulator model is patched.** In Rainbow's model the base has no
+rolling casters: it is one rigid body whose collision meshes rest on the floor
+with default friction. Odometry integrates the wheels, but the dragging base
+keeps the body from following them. Loading the image's own model in plain
+MuJoCo, where the true pose can be read, the body turned 23 % and drove 43 % of
+what wheel odometry reported. With the patch,
+[`assets/rby1_sim/base_geoms_frictionless.xml`](../assets/rby1_sim/base_geoms_frictionless.xml),
+it turned 103 % and drove 93 %. The patch is the image's
+`assets/base/geoms.xml` with `condim="1" friction="0 0 0"` on every base collision
+geom; wheels, arms and controller are untouched.
+
+Without the patch, the follower (which mirrors odometry) and the `rby1-sim`
+viewer visibly disagree: a 90° turn in odometry is about 15° in the viewer.
+The SDK reports only odometry, never the simulated body's true pose, so nothing
+in the pipeline can detect this. Worth reporting to Rainbow.
+
+The unpatched simulator still works for testing the control path. Run the
+pipeline with `--base-deadband sim` there ([4.2](#42-base)), and expect its
+viewer to disagree with the follower.
 
 Versions used: rby1-sdk 0.10.0 (client) against the 0.9.1 server in
 `rby1-sim:0.10.6-a_v1.2` (image `356e077d963d`), torch 2.2.0+cu121,
@@ -91,14 +114,14 @@ python -m mobipi.scripts.run_rby1_pipeline --task close_microwave \
     --dataset data/mimicgen/CloseDoorLeft_RBY1_115mg/demo_im128_head_wrist_clean37.hdf5 \
     --scene-dir scene_data/close_single_door/layout1_style1 \
     --layout-id 1 --style-id 1 --seed 1 --skip-detection \
-    --backend sdk --base-deadband sim
+    --backend sdk
 ```
 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--backend {sim,sdk}` | `sim` | `sim` is the unchanged RoboCasa pipeline |
 | `--robot-address` | `localhost:50051` | SDK address (simulator or robot) |
-| `--base-deadband {none,sim}` | `none` | Wheel deadband the base driver compensates. Use `sim` with `rby1-sim`, **never on the robot** ([4.2](#42-base)). |
+| `--base-deadband {none,sim}` | `none` | Wheel deadband the base driver compensates: `sim` for the unpatched `rby1-sim` model, `none` for the patched model and the robot ([4.2](#42-base)) |
 | `--arm-control {joint,cartesian}` | `joint` | How the policy's TCP targets reach the SDK ([4.3](#43-policy)) |
 
 `result.json` gets an `sdk` block:
@@ -150,12 +173,17 @@ the pose from odometry and sends `SE2VelocityCommandBuilder` commands on a
 stream (0.3 s hold time). The follower is synced kinematically while driving
 (about 1 ms per tick), and its contacts feed the existing collision checks.
 
-`rby1-sim`'s wheels reach `0.55 · (command − 0.24 rad/s)` per wheel. Without
-compensation the driver crawls near its goals and reports stalls.
-`--base-deadband sim` adds the deadband to each nonzero wheel speed. The 0.55
-gain is deliberately not inverted: the SDK ramps turn rates at about 1 rad/s²,
-and doubled commands overshoot the heading by about 0.4 rad. On the robot,
-measure the response first; the `sim` profile would overspeed the base.
+In the patched `rby1-sim` the wheels settle at about 58 % of the commanded
+speed (Rainbow's wheel control), and turn rates are ramped at about 1 rad/s².
+The closed loop absorbs both, at the cost of slower driving, so the driver sends
+the same commands as in the sim pipeline (`--base-deadband none`, the default).
+
+With the unpatched model the dragging base also creates a wheel deadband of
+about 0.24 rad/s, and the driver crawls near its goals and reports stalls.
+`--base-deadband sim` adds that deadband to each nonzero wheel speed. The
+control law is otherwise identical. The 0.58 gain is deliberately not inverted:
+the SDK ramps turn rates, and doubled commands overshoot the heading by about
+0.4 rad. Don't use `sim` on the robot.
 
 ### 4.3 Policy
 
@@ -215,7 +243,8 @@ depend on this.
 | A joint command with one target outside the SDK limits is rejected as a whole, silently (visible only in `docker logs`). | Targets are clipped (`clipped_joints`). |
 | The RoboSuite RB-Y1 joint ranges differ from the SDK URDF for most joints, e.g. `left_arm_4` ±6.283 vs ±3.142, `left_arm_5` ≤ 2.007 vs ≤ 1.920, `left_arm_1` ≥ −0.05 vs ≥ −0.017, `left_arm_6` ±2.967 vs ±2.705, `torso_0` ±0.349 vs ±0.262. | See [section 6](#6-results): the current policy depends on the extra range. |
 | Default joint acceleration limits make streamed targets start slowly (~10 % of each step per period). | Raised limits ([4.3](#43-policy)) |
-| `rby1-sim` wheels respond at `0.55 · (command − 0.24 rad/s)`, and turn rates are ramped at ~1 rad/s². | `--base-deadband sim` ([4.2](#42-base)) |
+| Rainbow's `rby1-sim` model drags its base on the floor: the body turns ~23 % and drives ~43 % of what odometry reports, and low wheel speeds stall. | Patched base collision file ([section 1](#1-reproducing-the-setup)), or `--base-deadband sim` with the unpatched model |
+| Wheels settle at ~58 % of the commanded speed, and turn rates are ramped at ~1 rad/s². | Absorbed by the closed-loop driver |
 | About 1 in 1000 `GetRobotState` calls fails in `rby1-sim` (protobuf "invalid UTF-8" in the self-collision link names). | State reads are retried. |
 | The SDK 0.10.0 client works with the 0.9.1 server in the simulator image. | — |
 
@@ -226,19 +255,22 @@ checkpoint `model_115_cartesian.pth`, seed 1, `--skip-detection`. The dataset
 argument was `datasets/demo_im128_head_wrist.hdf5`, the RGB dataset available
 on this machine for DINO scoring.
 
-| Stage | `--backend sim` | `--backend sdk --base-deadband sim` |
+| Stage | `--backend sim` | `--backend sdk` (patched `rby1-sim`) |
 | --- | --- | --- |
 | Mobilization | pose [0.829, −1.439, 1.613], score 0.775 | identical |
-| Navigation | 1.9 cm / 0.008 rad, 180 steps, no contacts | 1.7 cm / 0.007 rad, 321 steps, no contacts |
+| Navigation | 1.9 cm / 0.008 rad, 180 steps, no contacts | 1.8 cm / 0.006 rad, 314 steps, no contacts, no stall |
 | Policy | door closed at step 1305 | timeout after 2000 steps, door untouched |
 | Arm return | 0.0004 rad error, door stayed closed | not reached |
+
+The SDK robot needs more steps because the wheels reach only ~58 % of the
+commanded speed.
 
 Mobilization and navigation through the SDK behave like the sim. The policy
 doesn't, and the reason is the joint limits rather than the SDK path:
 
-- In the SDK run, targets were clipped to the SDK limits in 1598 of 2000 policy
-  steps (`left_arm_5` 1591, `left_arm_4` 1582, `left_arm_1` 7). The reference arm
-  never had to re-sync (`max_arm_reference_error_rad` 0.029), so the SDK
+- In the SDK run, targets were clipped to the SDK limits in 1597 of 2000 policy
+  steps (`left_arm_5` 1590, `left_arm_4` 1581, `left_arm_1` 7). The reference arm
+  never had to re-sync (`max_arm_reference_error_rad` 0.032), so the SDK
   followed every target it was allowed to.
 - The **successful sim rollout leaves the SDK limits too**: `left_arm_4`
   reaches 3.95 rad (SDK limit 3.142) for 430 steps, and `left_arm_5` sits at
@@ -254,7 +286,7 @@ doesn't, and the reason is the joint limits rather than the SDK path:
   backend's `clipped_joints` count is a quick check for new checkpoints.
 - Run more seeds in both backends once a policy within the SDK limits exists.
 - On the robot:
-  - measure the base response (no `--base-deadband sim`);
+  - check how closely wheel odometry matches the real motion;
   - localize the robot in the 3DGS frame instead of resetting odometry;
   - replace the follower's cameras and task progress with real cameras and a
     success check.

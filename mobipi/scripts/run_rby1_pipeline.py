@@ -55,8 +55,8 @@ def parser():
                         help="sim: RoboCasa only; sdk: drive the robot through rby1_sdk, RoboCasa follows")
     result.add_argument("--robot-address", default="localhost:50051", help="rby1_sdk address for --backend sdk")
     result.add_argument("--base-deadband", choices=("none", "sim"), default="none",
-                        help="Wheel deadband the SDK base driver compensates (rby1_sdk_utils.BASE_DEADBANDS); "
-                             "use sim with rby1-sim, not on the robot")
+                        help="Wheel deadband the SDK base driver compensates (rby1_sdk_utils.BASE_DEADBANDS): sim for "
+                             "the unpatched rby1-sim model, none for the patched model and the robot")
     result.add_argument("--arm-control", choices=("joint", "cartesian"), default="joint",
                         help="SDK arm control for the policy: joint streams the training-time WholeBody IK "
                              "solution, cartesian uses the SDK Cartesian controller (rby1_sdk_utils.SDKPolicyEnv)")

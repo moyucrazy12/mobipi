@@ -71,12 +71,10 @@ JOINT_MOVE_MIN_TIME = 2.0
 WHEEL_TRACK = 0.53
 WHEEL_RADIUS = 0.1
 # Wheel speed deadband [rad/s] that SDKBaseDriver adds to every nonzero wheel
-# speed. rby1-sim (0.10.6-a_v1.2) reaches actual = 0.55 * (command - 0.24) per
-# wheel, so without it the closed-loop driver crawls near its goals and reports
-# stalls. The 0.55 gain is deliberately not inverted: the SDK ramps turn rates
-# at ~1 rad/s^2, and the doubled commands then overshoot the heading by ~0.4 rad.
-# The robot's response is unknown: measure it there (rby1_sdk_checks prints the
-# turn rate) before adding a profile.
+# speed. In Rainbow's unpatched rby1-sim model the base drags on the floor, so
+# the wheels barely turn below ~0.24 rad/s and the closed-loop driver crawls
+# near its goals and reports stalls ("sim"). The patched model
+# (assets/rby1_sim/base_geoms_frictionless.xml) and the robot need "none".
 BASE_DEADBANDS = {
     "none": 0.0,
     "sim": 0.24,
@@ -432,6 +430,8 @@ class SDKBaseDriver(rby1_utils._BaseDriver):
     """
     _BaseDriver that reads odometry and sends SE(2) velocity commands through
     the SDK, adding the session's wheel deadband (BASE_DEADBANDS) per wheel.
+    rby1-sim's wheels settle at ~58 % of the commanded speed; the closed loop
+    absorbs that.
     """
 
     def __init__(self, session, step_callback):
