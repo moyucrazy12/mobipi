@@ -18,7 +18,38 @@
       "robot0_right_eye_in_hand"
     ],
     "camera_heights": 128,
-    "camera_widths": 128
+    "camera_widths": 128,
+    "faucet_hold_reset_pose": true,
+    "faucet_initial_arm_qpos": [
+      -0.3035387181510782,
+      -0.3335027738733324,
+      0.15022407495495252,
+      -1.527804755773873,
+      -1.414002662167191,
+      0.3596290532645748,
+      -0.5595005720647946
+    ],
+    "faucet_initial_torso_qpos": [
+      0.0,
+      0.65,
+      -0.35,
+      -0.3,
+      0.0,
+      0.0
+    ],
+    "force_robot_placement": [
+      [
+        2.75,
+        -1.5,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        -1.5707963267948966
+      ]
+    ],
+    "faucet_ik_mode": "bounded"
   },
   "script": {
     "cartesian_increment": 0.002,
@@ -26,9 +57,39 @@
     "tracking_patience": 12,
     "waypoint_tolerance": 0.015,
     "settle_steps": 80,
-    "target_angle": 0.48,
-    "approach_world": null,
-    "video_camera": "faucet_overview"
+    "target_angle": 0.46,
+    "approach_world": [
+      -0.5,
+      0.8660254,
+      0.0
+    ],
+    "video_camera": "faucet_overview",
+    "rotation_increment": 0.02,
+    "max_rollout_seconds": 120.0,
+    "waypoint": {
+      "position_tolerance": 0.005,
+      "orientation_tolerance": 0.03,
+      "max_steps": 240,
+      "max_seconds": 12.0,
+      "stall_window_steps": 120,
+      "min_position_progress": 0.0005,
+      "min_orientation_progress": 0.002,
+      "transient_position_error": 0.06
+    },
+    "controller_mode": "bounded_joint",
+    "joint_velocity": 0.4,
+    "cartesian_anchor_spacing": 0.08,
+    "contact_position_tolerance": 0.005,
+    "approach_position_tolerance": 0.015,
+    "arc_waypoints": 16,
+    "grasp_depth": 0.02,
+    "freeze_articulation_orientation": true,
+    "arc_hold_steps": 8,
+    "handle_height_offset": 0.025,
+    "joint_acceleration": 1.0,
+    "feedback_articulation": true,
+    "handle_angle_lead": 0.14,
+    "max_commanded_arc_angle": 0.7
   },
   "mimicgen": {
     "seed": 42,

@@ -58,6 +58,16 @@ class DatasetValidationTests(unittest.TestCase):
             self.assertEqual(ep["diagnostics/actual_tcp"][0, 0, 3], 0.)
         validate(path)
 
+    def test_native_combined_robot_proprioception_is_valid(self):
+        with h5py.File(self.path, "a") as f:
+            obs = f["data/demo_0/obs"]
+            del obs["robot0_right_joint_pos"]
+            obs.create_dataset("robot0_joint_pos_cos", data=np.ones((8, 28)))
+            obs.create_dataset("robot0_joint_pos_sin", data=np.zeros((8, 28)))
+            obs.create_dataset("robot0_joint_vel", data=np.zeros((8, 28)))
+            obs.create_dataset("robot0_right_eef_pos", data=np.zeros((8, 3)))
+        validate(self.path)
+
     def test_valid_ordered_segmentation(self):
         self.assertEqual(validate(self.path, prepared=True)[0]["boundaries"], [2, 5])
 

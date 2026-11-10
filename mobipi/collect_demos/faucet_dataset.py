@@ -61,7 +61,16 @@ def validate(path, prepared=False):
             for k in ("actions", "states", "rewards", "dones", "obs", "diagnostics"):
                 if k not in ep:
                     raise ValueError(f"{name}: missing {k}")
-            if not any("right" in k and "joint" in k for k in ep["obs"]):
+            # Native RB-Y1 observables expose all 28 joints together, often as
+            # sin/cos rather than a separately named right_joint_pos sensor.
+            # Preserve that standard schema instead of inventing arm-only keys.
+            obs = ep["obs"]
+            named_arm = any("right" in k and "joint" in k for k in obs)
+            combined = (all(k in obs for k in ("robot0_joint_pos_cos", "robot0_joint_pos_sin", "robot0_joint_vel", "robot0_right_eef_pos"))
+                        and obs["robot0_joint_pos_cos"].shape == obs["robot0_joint_pos_sin"].shape == obs["robot0_joint_vel"].shape
+                        and len(obs["robot0_joint_pos_cos"].shape) == 2
+                        and obs["robot0_joint_pos_cos"].shape[1] >= 14)
+            if not (named_arm or combined):
                 raise ValueError(f"{name}: missing right-arm proprioception")
             if not any(k.endswith("_image") for k in ep["obs"]):
                 raise ValueError(f"{name}: missing camera observations")

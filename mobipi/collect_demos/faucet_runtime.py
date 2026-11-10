@@ -1,5 +1,6 @@
 """Task-local RB-Y1 faucet adapters. Import before creating or replaying environments."""
 import importlib.util
+import logging
 from pathlib import Path
 from types import MethodType
 import xml.etree.ElementTree as ET
@@ -45,12 +46,81 @@ def handle_state(sink, env):
 
 class TurnOnSinkFaucetRBY1(TurnOnSinkFaucet):
     """Original task with a scoped correction to the fixture state reader."""
-    def __init__(self, faucet_initial_arm_qpos=None, **kwargs):
+    def __init__(self, faucet_initial_arm_qpos=None, faucet_hold_reset_pose=False, faucet_initial_torso_qpos=None, faucet_ik_mode="addressed", faucet_fixture_offset=None, **kwargs):
+        if faucet_ik_mode not in ("addressed", "bounded"):
+            raise ValueError("Unsupported faucet_ik_mode")
+        self.faucet_ik_mode = faucet_ik_mode
         self.faucet_initial_arm_qpos = faucet_initial_arm_qpos
-        super().__init__(**kwargs)
+        self.faucet_hold_reset_pose = faucet_hold_reset_pose
+        self.faucet_initial_torso_qpos = faucet_initial_torso_qpos
+        offset = np.zeros(4) if faucet_fixture_offset is None else np.asarray(faucet_fixture_offset, dtype=float)
+        if offset.shape != (4,) or not np.isfinite(offset).all():
+            raise ValueError("faucet_fixture_offset requires finite world dx, dy, dz and yaw radians")
+        self.faucet_fixture_offset = offset
+        self._faucet_offset_model = None
+        self._faucet_resetting = False
+        self._reset_solver = None
+        try:
+            super().__init__(**kwargs)
+        except Exception:
+            # A constructor failure cannot return an environment to the caller
+            # for cleanup. Compilation may have failed before sim was assigned.
+            self.sim = getattr(self, "sim", None)
+            self.viewer = getattr(self, "viewer", None)
+            try:
+                self.close()
+            except Exception:
+                logging.getLogger(__name__).exception("Failed to close partially initialized faucet environment")
+            raise
+
+    def _reset_internal(self):
+        self._faucet_resetting = self.faucet_hold_reset_pose
+        self._reset_solver = None
+        try:
+            super()._reset_internal()
+        finally:
+            self._faucet_resetting = False
+            if self._reset_solver is not None:
+                policy, solve = self._reset_solver
+                policy.solve = solve
+        if self.faucet_ik_mode == "bounded":
+            # Persist solver choice in environment metadata for ordinary replay.
+            self._faucet_control_interface = MG_RBY1TurnOnSinkFaucet(self)
+
+    def _pre_action(self, action, policy_step=False):
+        # RoboCasa settles objects using an all-zero action. For absolute WBIK
+        # that commands both wrists to world origin, destroying the reset posture.
+        if self._faucet_resetting:
+            robot = self.robots[0]
+            policy = robot.composite_controller.joint_action_policy
+            if self._reset_solver is None:
+                self._reset_solver = (policy, policy.solve)
+                hold = np.array([float(self.sim.data.get_joint_qpos(n)) for n in policy.joint_names])
+                policy.solve = lambda action: hold.copy()
+            parts = {}
+            for part in ("torso", "head"):
+                ctrl = robot.part_controllers.get(part)
+                if ctrl is not None:
+                    parts[part] = self.sim.data.qpos[ctrl.qpos_index].copy()
+            action = robot.create_action_vector(parts)
+        return super()._pre_action(action, policy_step)
 
     def _load_model(self):
         super()._load_model()
+        # Apply once to each newly assembled XML, including recursive placement
+        # retries. Move the complete static sink fixture before compilation;
+        # the robot base, hinge state and manipulation controller are unchanged.
+        if np.any(self.faucet_fixture_offset) and self._faucet_offset_model is not self.model:
+            self._faucet_offset_model = self.model
+            self.sink.set_pos(np.asarray(self.sink.pos) + self.faucet_fixture_offset[:3])
+            euler = self.sink.euler.copy()
+            euler[2] += self.faucet_fixture_offset[3]
+            self.sink.set_euler(euler)
+        if self.faucet_initial_torso_qpos is not None:
+            torso = np.asarray(self.faucet_initial_torso_qpos, dtype=float)
+            if torso.shape != (6,) or not np.isfinite(torso).all():
+                raise ValueError("faucet_initial_torso_qpos must contain six finite joint angles")
+            self.robots[0].init_torso_qpos = torso
         if self.faucet_initial_arm_qpos is not None:
             values = np.asarray(self.faucet_initial_arm_qpos, dtype=float)
             if values.shape != (7,) or not np.isfinite(values).all():
@@ -60,7 +130,8 @@ class TurnOnSinkFaucetRBY1(TurnOnSinkFaucet):
             for index, value in enumerate(values):
                 initial[robot.robot_model.joints.index(f"robot0_right_arm_{index}")] = value
             robot.init_qpos = initial
-        target = np.asarray(self.sink.pos) + [0., 0., .05]
+        # Fixture augmentation must not move the overview camera with the sink.
+        target = np.asarray(self.sink.pos) - self.faucet_fixture_offset[:3] + [0., 0., .05]
         position = target + [-1.2, 1.4, 1.1]
         z = position-target
         z /= np.linalg.norm(z)
@@ -68,8 +139,16 @@ class TurnOnSinkFaucetRBY1(TurnOnSinkFaucet):
         x /= np.linalg.norm(x)
         y = np.cross(z, x)
         quat = np.roll(Rotation.from_matrix(np.column_stack([x, y, z])).as_quat(), 1)
-        self.model.worldbody.append(ET.Element("camera", name="faucet_overview",
-            pos=" ".join(map(str, position)), quat=" ".join(map(str, quat)), fovy="55"))
+        # Kitchen._load_model may recursively retry placement through this
+        # override. Each unwinding call sees the same final model, so update its
+        # camera instead of appending another one. No shared camera config/XML
+        # is modified; the element belongs to this environment's task model.
+        camera = self.model.worldbody.find("camera[@name='faucet_overview']")
+        if camera is None:
+            camera = ET.SubElement(self.model.worldbody, "camera", name="faucet_overview")
+        camera.set("pos", " ".join(map(str, position)))
+        camera.set("quat", " ".join(map(str, quat)))
+        camera.set("fovy", "55")
 
     def _setup_kitchen_references(self):
         super()._setup_kitchen_references()
@@ -206,6 +285,9 @@ class MG_RBY1TurnOnSinkFaucet(RobosuiteInterface):
         low, high = raw_model(self.env.sim).actuator_ctrlrange[actuator]
         q = float(self.env.sim.data.get_joint_qpos(left.joints[0]))
         self.left_gripper_hold = float(np.clip(2*(q-low)/(high-low)-1, -1, 1))
+        if self.env.faucet_ik_mode == "bounded":
+            from mobipi.collect_demos.faucet_bounded_ik import bind_bounded_ik
+            self.bounded = bind_bounded_ik(self)
 
     def get_datagen_info(self, action=None):
         if self.env.robots[0].composite_controller.joint_action_policy is not self._policy:

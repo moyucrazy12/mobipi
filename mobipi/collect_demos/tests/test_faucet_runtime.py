@@ -84,26 +84,45 @@ class ExecutorAdapterTests(unittest.TestCase):
         from mobipi.collect_demos.faucet_pipeline import rby1_waypoint_executor
 
         class FakeRecorder:
-            def __init__(self, env, interface, settings, video, log):
+            def __init__(self, env, interface, settings, video, log, tracking):
                 self.rows = []
+                self.datagen_infos = []
+                self.tracking = SimpleNamespace(write=lambda info: None)
+                self.bounded = SimpleNamespace(
+                    command=interface.previous, addresses=np.arange(7),
+                    optimize=lambda pose, seed=None: np.full(7, interface.delta),
+                    command_joints=lambda q: pose,
+                    last={"position_error": interface.residual, "orientation_error": 0.})
 
             def step(self, pose, gripper, phase):
                 self.rows.append(dict(states=np.zeros(3), obs={}, actions=pose[:3, 3].copy()))
+                self.datagen_infos.append(gripper.copy())
 
-        interface = SimpleNamespace(refresh=lambda: None,
-                                    full_action=lambda pose, gripper: pose[:3, 3],
-                                    get_datagen_info=lambda action: action)
-        env = SimpleNamespace(is_success=lambda: {"task": False})
+            def transition(self, q, gripper, phase):
+                self.step(pose, gripper, phase)
+                self.step(pose, gripper, phase)
+
+        env = SimpleNamespace(is_success=lambda: {"task": True})
         pose = np.eye(4)
         pose[:3, 3] = [2.75, -2.4, 1.1]
         trajectory = WaypointTrajectory()
-        trajectory.add_waypoint_sequence(WaypointSequence([Waypoint(pose, np.array([1.]), noise=0.)]))
+        trajectory.add_waypoint_sequence(WaypointSequence([
+            Waypoint(pose, np.array([1.]), noise=0.),
+            Waypoint(pose, np.array([-1.]), noise=0.)]))
         original = WaypointTrajectory.execute
-        with patch("mobipi.collect_demos.faucet_pipeline.Recorder", FakeRecorder):
-            with rby1_waypoint_executor({}, None, None):
-                result = trajectory.execute(env, interface)
-        self.assertIs(WaypointTrajectory.execute, original)
-        np.testing.assert_array_equal(result["actions"][0], [2.75, -2.4, 1.1])
+        for delta, previous, expected_steps, residual, enforce in ((0., None, 2, 0., True), (.1, None, 4, 0., True), (.1, np.full(7, .1), 2, 0., True), (0., None, 2, .01, False)):
+            interface = SimpleNamespace(refresh=lambda: None, delta=delta, previous=previous, residual=residual,
+                env=SimpleNamespace(sim=None, control_timestep=.05))
+            with patch("mobipi.collect_demos.faucet_pipeline.JointSpaceRecorder", FakeRecorder), \
+                 patch("mobipi.collect_demos.faucet_pipeline.raw_data", return_value=SimpleNamespace(qpos=np.zeros(7))):
+                with rby1_waypoint_executor({"contact_position_tolerance": .005, "joint_velocity": .4, "require_cartesian_tolerance": enforce}, None, None):
+                    result = trajectory.execute(env, interface)
+            self.assertIs(WaypointTrajectory.execute, original)
+            np.testing.assert_array_equal(result["actions"][0], [2.75, -2.4, 1.1])
+            self.assertEqual(len(result["actions"]), expected_steps)
+            self.assertEqual(len(result["datagen_infos"]), expected_steps)
+            # Early task success must not skip the later release command.
+            np.testing.assert_array_equal(result["datagen_infos"][-1], [-1.])
 
     def test_executor_restored_after_exception(self):
         from mimicgen.datagen.waypoint import WaypointTrajectory
