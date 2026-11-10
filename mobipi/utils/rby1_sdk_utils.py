@@ -391,6 +391,9 @@ class Follower:
             sim.data.qpos[self.qpos_addrs] = self.positions[self.mirrored_indices]
             sim.data.qvel[self.qvel_addrs] = 0.0
             sim.forward()
+            # env.step refreshes the --vis viewer; without it the robot would only jump there later
+            if self.env.viewer is not None and self.env.renderer != "mujoco":
+                self.env.viewer.update()
         self.contacts = rby1_utils.robot_env_contacts(sim)
         self.joint_error = float(np.max(np.abs(self.env.sim.data.qpos[self.qpos_addrs]
                                                - self.positions[self.mirrored_indices])))
