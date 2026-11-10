@@ -9,6 +9,11 @@ checkpoint and dataset.
     python -m mobipi.scripts.run_rby1_pipeline --task close_microwave \
         --scene-dir scene_data/close_single_door/layout1_style1 \
         --skip-detection --vis
+
+With --backend sdk, navigation, the policy and the arm return drive an RB-Y1
+through rby1_sdk (rby1-sim or the robot at --robot-address) while the RoboCasa
+env follows its state for cameras, contacts and task progress
+(docs/rby1_sdk_integration.md).
 """
 
 import argparse
@@ -46,6 +51,15 @@ def parser():
                         help="Keep the dataset's scene settings instead of matching the 3DGS capture "
                              "(e.g. which drawer is open)")
     result.add_argument("--nav-mode", choices=("velocity", "kinematic"), default="velocity")
+    result.add_argument("--backend", choices=("sim", "sdk"), default="sim",
+                        help="sim: RoboCasa only; sdk: drive the robot through rby1_sdk, RoboCasa follows")
+    result.add_argument("--robot-address", default="localhost:50051", help="rby1_sdk address for --backend sdk")
+    result.add_argument("--base-deadband", choices=("none", "sim"), default="none",
+                        help="Wheel deadband the SDK base driver compensates (rby1_sdk_utils.BASE_DEADBANDS); "
+                             "use sim with rby1-sim, not on the robot")
+    result.add_argument("--arm-control", choices=("joint", "cartesian"), default="joint",
+                        help="SDK arm control for the policy: joint streams the training-time WholeBody IK "
+                             "solution, cartesian uses the SDK Cartesian controller (rby1_sdk_utils.SDKPolicyEnv)")
     result.add_argument("--policy-device", choices=("cuda", "cpu"), default="cuda")
     result.add_argument("--policy-steps", type=int, default=2000, help="Maximum learned-policy steps before timeout")
     result.add_argument("--output-dir", type=Path, default=None)
@@ -164,8 +178,11 @@ def select_base_pose(env, args, scene_run, fixture_bounds, floor_bounds, robot_s
     return initial_pose, selected_pose, distribution.k_col, float(scores.max())
 
 
-def run_policy(env, policy, task, seed, max_steps, vis=False, progress=None):
-    """Start a fresh policy history at the reached pose, without resetting the scene."""
+def run_policy(env, policy, task, seed, max_steps, vis=False, progress=None, session=None):
+    """Start a fresh policy history at the reached pose, without resetting the scene.
+
+    With an SDK session the targets go to the SDK robot and env is its follower.
+    """
     import gc
     import numpy as np
     import torch
@@ -184,7 +201,11 @@ def run_policy(env, policy, task, seed, max_steps, vis=False, progress=None):
     for controller in env.robots[0].composite_controller.part_controllers.values():
         controller.update(force=True)
         controller.reset_goal()
-    adapter = RBY1CartesianAdapter(env)
+    if session is None:
+        step_env, adapter = env, RBY1CartesianAdapter(env)
+        native_read = observation_reader(env, adapter)
+    else:
+        step_env, adapter, native_read = session.policy_interfaces()
     task_progress = task.progress_fn(env)
     base_start = adapter.site_transform(adapter.base_site).copy()
     policy.policy.inference_noise_generator = torch.Generator(device="cpu").manual_seed(seed)
@@ -221,8 +242,6 @@ def run_policy(env, policy, task, seed, max_steps, vis=False, progress=None):
             print(f"Task done for 0.5 seconds at policy step {step + 1}; stopping learned actions.", flush=True)
             return False
 
-    native_read = observation_reader(env, adapter)
-
     def read_observation():
         # 3DGS and the interactive viewer can leave another GL context current.
         # Robosuite's render method does not rebind its offscreen context itself.
@@ -231,7 +250,7 @@ def run_policy(env, policy, task, seed, max_steps, vis=False, progress=None):
         mujoco.mjr_setBuffer(mujoco.mjtFramebuffer.mjFB_OFFSCREEN, context.con)
         return native_read()
 
-    result = execute_loop(policy, env, adapter, read_observation, None, max_steps, observer=observe,
+    result = execute_loop(policy, step_env, adapter, read_observation, None, max_steps, observer=observe,
                           progress_fn=task_progress, success_threshold=task.success_threshold)
     result["closure_confirmed"] = done_steps >= required_done_steps
     result["success"] = bool(result["success"] and result["closure_confirmed"])
@@ -315,18 +334,19 @@ def return_arm_to_start(env, task, home_qpos, grippers, vis=False, progress=None
     return progress
 
 
-def navigate_to_pose(env, target, collision, floor_bounds, grippers, mode):
+def navigate_to_pose(env, target, collision, floor_bounds, grippers, mode, session=None):
     """Drive to the goal through a staging pose behind it (rby1_utils.approach_pose).
 
     The robot turns to the final heading in open space and ends with a straight
     drive in, so it does not sweep its torso into an open door or drawer. The
-    collision checks stay active on the whole drive.
+    collision checks stay active on the whole drive. With an SDK session the
+    SDK robot drives and env follows it.
     """
     from mobipi.utils import rby1_utils
 
     return rby1_utils.move_to_pose(
         env, target, collision, floor_bounds, render_camera=None, gripper_action=grippers, mode=mode,
-        use_approach=True,
+        use_approach=True, driver_factory=None if session is None else session.base_driver,
     )
 
 
@@ -339,6 +359,11 @@ def main(argv=None):
     if (args.policy_steps < 1 or args.k < 1 or args.num_init_samples < 5
             or args.num_init_samples % 5 or args.bo_num_samples < 0 or args.bo_num_samples % 5):
         arguments.error("Use positive policy-steps/k and sample counts divisible by five (at least five initial samples)")
+    if args.backend == "sdk":
+        if args.nav_mode != "velocity":
+            arguments.error("--backend sdk drives the base with velocity commands; use --nav-mode velocity")
+        if importlib.util.find_spec("rby1_sdk") is None:
+            arguments.error("--backend sdk needs rby1_sdk in this environment (pip install rby1-sdk)")
     args.dataset, args.scene_dir, args.checkpoint = [p.expanduser().resolve() for p in (args.dataset, args.scene_dir, args.checkpoint)]
     for path in (args.dataset, args.checkpoint, args.scene_dir / "pc.ply"):
         if not path.is_file():
@@ -387,11 +412,14 @@ def main(argv=None):
     output = output.expanduser().resolve()
     output.mkdir(parents=True, exist_ok=False)
     checkpoint = torch.load(str(args.checkpoint), map_location="cpu", weights_only=False)
-    env = None
+    env = session = None
     result = dict(task=task.name, checkpoint=str(args.checkpoint), dataset=str(args.dataset), scene_dir=str(args.scene_dir),
                   layout_id=args.layout_id, style_id=args.style_id, seed=args.seed, success=False,
                   policy_device=args.policy_device, policy_steps=args.policy_steps, vis=args.vis,
-                  collision_radius_scale=args.collision_radius_scale, stage="environment", policy=None)
+                  collision_radius_scale=args.collision_radius_scale, backend=args.backend,
+                  base_deadband=args.base_deadband if args.backend == "sdk" else None,
+                  arm_control=args.arm_control if args.backend == "sdk" else None,
+                  stage="environment", policy=None)
     try:
         env = make_env(metadata, args, task)
         overrides = {} if args.no_scene_overrides else task.scene_overrides(env, args.scene_dir)
@@ -414,14 +442,25 @@ def main(argv=None):
         # Gripper slots follow the base slot, whose size changes from two wheels to SE(2).
         grippers = {part: first_action[start + shift:end + shift] for part, (start, end) in split.items() if part.endswith("gripper")}
 
+        if args.backend == "sdk":
+            from mobipi.utils.rby1_sdk_utils import SDKSession
+
+            result["stage"] = "sdk_connect"
+            session = SDKSession(env, args.robot_address, grippers, args.base_deadband, args.arm_control)
+
         result["stage"] = "mobilization"
         print("Stage 1/3: select a manipulation base pose", flush=True)
         initial_pose, selected_pose, collision, best_score = select_base_pose(
             env, args, scene_run, fixture_bounds, floor_bounds, robot_size, default_pose, output,
         )
+        if session is not None:
+            # The follower stands at the initial pose in the task posture; the SDK robot takes both over.
+            result["stage"] = "sdk_attach"
+            print(f"Aligning the SDK robot with the follower at {initial_pose.round(3)}", flush=True)
+            session.attach(initial_pose)
         result["stage"] = "navigation"
         print("Stage 2/3: navigate to the selected pose", flush=True)
-        navigation = navigate_to_pose(env, selected_pose, collision, floor_bounds, grippers, args.nav_mode)
+        navigation = navigate_to_pose(env, selected_pose, collision, floor_bounds, grippers, args.nav_mode, session)
         navigation.pop("images")
         np.savez(output / "navigation.npz", poses=navigation.pop("base_vec_history"), waypoints=navigation.pop("waypoints"))
         reached = navigation["settled_vec"]
@@ -439,9 +478,10 @@ def main(argv=None):
                       best_score=best_score, navigation=navigation, navigation_success=bool(nav_success),
                       navigation_position_error_m=position_error, navigation_heading_error_rad=heading_error)
         if nav_success:
-            # Restore the carried arm posture only. The reached base and task state stay in place.
-            rby1_utils.set_robot_joint_qpos(env, posture)
-            env.sim.forward()
+            if session is None:
+                # Restore the carried arm posture only. The reached base and task state stay in place.
+                rby1_utils.set_robot_joint_qpos(env, posture)
+                env.sim.forward()
             del collision
             torch.cuda.empty_cache()
             result["stage"] = "policy_loading"
@@ -450,19 +490,26 @@ def main(argv=None):
             del checkpoint
             result["stage"] = "policy"
             print("Stage 3/3: run the Cartesian manipulation policy", flush=True)
-            left = env.robots[0].composite_controller.part_controllers["left"]
-            home_qpos = env.sim.data.qpos[left.qpos_index].copy()
+            if session is None:
+                left = env.robots[0].composite_controller.part_controllers["left"]
+                home_qpos = env.sim.data.qpos[left.qpos_index].copy()
+            else:
+                session.robot.update()
+                home_qpos = session.robot.positions[session.robot.part_indices["left_arm"]]
             result["policy"] = {}
             result["policy"] = run_policy(env, policy, task, args.seed, args.policy_steps, args.vis,
-                                          progress=result["policy"])
+                                          progress=result["policy"], session=session)
             if result["policy"]["error"]:
                 raise RuntimeError(f"{result['policy']['error_stage']}: {result['policy']['error']}")
             if result["policy"]["success"]:
                 result["stage"] = "arm_return"
                 print("Returning the left arm to its initial joint posture.", flush=True)
                 result["arm_return"] = {}
-                result["arm_return"] = return_arm_to_start(env, task, home_qpos, grippers, args.vis,
-                                                          progress=result["arm_return"])
+                if session is None:
+                    result["arm_return"] = return_arm_to_start(env, task, home_qpos, grippers, args.vis,
+                                                              progress=result["arm_return"])
+                else:
+                    result["arm_return"] = session.return_arm(task, home_qpos, progress=result["arm_return"])
                 result["success"] = bool(result["arm_return"]["success"])
         else:
             result["policy"] = None
@@ -478,6 +525,13 @@ def main(argv=None):
         result["error"] = f"{type(error).__name__}: {error}"
         raise
     finally:
+        if session is not None:
+            result["sdk"] = session.stats()
+            try:
+                session.close()
+            except Exception as error:  # still write the result; the robot may need a manual stop
+                result["sdk"]["shutdown_error"] = f"{type(error).__name__}: {error}"
+                print(f"SDK shutdown failed: {error}", flush=True)
         if env is not None:
             env.close()
         text = json.dumps(result, indent=2, default=lambda value: value.tolist())

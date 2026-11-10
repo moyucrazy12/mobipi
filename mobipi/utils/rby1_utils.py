@@ -383,6 +383,10 @@ class _BaseDriver:
         self.sim.forward()
         self.step_callback()
 
+    def hold(self):
+        """One control step holding the robot still (zero base velocity)."""
+        self.env.step(hold_action(self.env, self.gripper_action))
+
     def _timeout(self, amount, rate):
         """Max control steps for a maneuver: 3x the nominal duration plus slack."""
         return int(3 * abs(amount) / rate * self.env.control_freq) + 60
@@ -451,7 +455,7 @@ def approach_pose(k_col, start_vec, target_vec, dists=APPROACH_DISTS):
 def move_to_pose(env, target_vec, k_col, floor_fixture_bounds_2d,
                  render_camera="robot0_head_camera", render_size=256,
                  settle_steps=20, gripper_action=None, use_rrt=True, mode="velocity",
-                 use_approach=True):
+                 use_approach=True, driver_factory=None):
     """
     Navigates the RB-Y1 base to `target_vec` = [x, y, yaw].
 
@@ -464,9 +468,11 @@ def move_to_pose(env, target_vec, k_col, floor_fixture_bounds_2d,
     base is moved along the plan directly at `nav_utils.move_to_pose`'s
     speed limits, ignoring base dynamics. Penetrating robot-environment
     contacts are recorded at every step. After arrival the sim is stepped with
-    a hold action to check the final pose is stable.
+    a hold action to check the final pose is stable. `driver_factory(step_callback)`
+    replaces the simulated `_BaseDriver` (e.g. `SDKSession.base_driver`).
     """
     assert mode in ("velocity", "kinematic"), mode
+    assert driver_factory is None or mode == "velocity", "a custom driver needs velocity mode"
     sim = env.sim
     target_vec = np.asarray(target_vec, dtype=float)
     init_vec = get_base_vec(sim)
@@ -512,6 +518,7 @@ def move_to_pose(env, target_vec, k_col, floor_fixture_bounds_2d,
             images.append(render_cameras(sim, [render_camera], render_size)[0])
 
     stuck = False
+    driver = None
     if mode == "kinematic":
         curr = init_vec.copy()
         for i, wp in enumerate(waypoints[1:], start=1):
@@ -522,7 +529,10 @@ def move_to_pose(env, target_vec, k_col, floor_fixture_bounds_2d,
                 record_step()
                 curr = pose
     else:
-        driver = _BaseDriver(env, gripper_action, reset_joint_qpos, record_step)
+        if driver_factory is None:
+            driver = _BaseDriver(env, gripper_action, reset_joint_qpos, record_step)
+        else:
+            driver = driver_factory(record_step)
         target_axle = driver.axle_xy(target_vec)
         for i, wp in enumerate(waypoints[1:-1], start=1):
             if i in final_headings:  # staging pose: line up the axle exactly behind the target
@@ -540,7 +550,10 @@ def move_to_pose(env, target_vec, k_col, floor_fixture_bounds_2d,
 
     # let physics run with the robot holding still to check the pose is stable
     for _ in range(settle_steps):
-        env.step(hold_action(env, gripper_action))
+        if driver is None:
+            env.step(hold_action(env, gripper_action))
+        else:
+            driver.hold()
         if render_camera is not None:
             images.append(render_cameras(sim, [render_camera], render_size)[0])
     settled_vec = get_base_vec(sim)
