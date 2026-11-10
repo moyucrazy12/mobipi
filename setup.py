@@ -1,4 +1,4 @@
-from setuptools import setup, find_packages
+from setuptools import setup, find_namespace_packages
 
 
 setup(
@@ -10,7 +10,14 @@ setup(
     author="Jingyun Yang",
     author_email="jingyuny@stanford.edu",
     url="https://github.com/yjy0625/mobipi",
-    packages=find_packages(),
+    packages=find_namespace_packages(
+        include=("mobipi", "mobipi.*", "rby1", "rby1.*"),
+        exclude=("*.__pycache__",),
+    ),
+    package_data={
+        "rby1": ["configs/*.json", "configs/mimicgen/*.json", "tests/fixtures/*.json"],
+        "mobipi.collect_demos": ["*.json"],
+    },
     install_requires=[
     ],
     classifiers=[
