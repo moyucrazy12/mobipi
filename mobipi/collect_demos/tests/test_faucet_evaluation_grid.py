@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import tempfile
+import sys
 import unittest
 import xml.etree.ElementTree as ET
 from types import SimpleNamespace
@@ -13,9 +14,7 @@ import numpy as np
 from mobipi.collect_demos import evaluate_faucet_dp as evaluation
 
 
-PROJECT = Path(__file__).resolve().parents[4]
-DATASET = PROJECT / "experiment_results/TurnOnFaucet/demos/faucet_relative_cartesian_100/train.hdf5"
-CHECKPOINT = PROJECT / "experiment_results/TurnOnFaucet/train/rby1_faucet_relative_cartesian_4000steps/20261028145350/models/model_epoch_14.pth"
+DATASET = CHECKPOINT = None  # Assigned temporary fixtures in setUpClass.
 
 
 class FaucetGridTests(unittest.TestCase):
@@ -23,10 +22,55 @@ class FaucetGridTests(unittest.TestCase):
     def setUpClass(cls):
         evaluation.O.initialize_obs_utils_with_obs_specs(
             {"obs": {"low_dim": evaluation.LOWDIM, "rgb": evaluation.RGB}})
+        # Synthetic saved starts keep restore/resume guards reproducible without
+        # private HDF5 files, checkpoints, absolute asset paths or shard logs.
+        temporary = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        paths = patch.multiple(sys.modules[__name__], DATASET=root / "saved_starts.hdf5",
+                               CHECKPOINT=root / "synthetic_checkpoint.pth")
+        paths.start()
+        cls.addClassCleanup(paths.stop)
+        CHECKPOINT.write_bytes(b"Synthetic fingerprint fixture; never loaded as a policy")
+        historical = patch.object(evaluation, "historical_path", side_effect=lambda *parts: root.joinpath(*parts))
+        historical.start()
+        cls.addClassCleanup(historical.stop)
+        with h5py.File(DATASET, "x") as f:
+            f.create_dataset("mask/valid", data=np.asarray(evaluation.VALIDATION_DEMOS, dtype="S"))
+            data = f.create_group("data")
+            data.attrs["env_args"] = json.dumps({"env_name": "TurnOnSinkFaucetRBY1"})
+            for index, (name, seed) in enumerate(zip(evaluation.VALIDATION_DEMOS, [1005, 1006, 1012, 2007, 2018])):
+                directory = root / "demos" / name
+                directory.mkdir(parents=True)
+                (directory / "config.json").write_text(json.dumps({"mimicgen": {"seed": seed}}))
+                record = dict(seed=seed, attempt=0, successful=True, requested_fixture_offset=[0., 0., 0., 0.])
+                (directory / "attempt_000_metadata.json").write_text(json.dumps(record))
+                group = data.create_group(name)
+                xml = ('<mujoco><worldbody><body name="fixed_mount0_base">'
+                       '<joint name="robot0_right_arm_0"/>'
+                       '<camera name="faucet_overview" fovy="55"/>'
+                       '<camera name="robot0_right_eye_in_hand" fovy="55"/></body>'
+                       f'<body name="sink_island_group_main" pos="{index} 0 0" quat="1 0 0 0"/>'
+                       '<body name="distr_sink_main"><joint name="distr_sink_joint0" type="free"/>'
+                       '</body></worldbody></mujoco>')
+                meta = {"object_cfgs": [{"name": "distr_sink", "info": {"cat": "synthetic"}}]}
+                group.attrs.update(model_file=xml, ep_meta=json.dumps(meta), fixture_offset=[0., 0., 0., 0.],
+                                   generation_directory=f"data/{name}", generation_attempt=0,
+                                   source_demo_names=json.dumps(["seed_0"]))
+                state = np.array([index * .01, .1, .2, .3, .4, 1., 0., 0., 0., *([0.] * 7)])
+                group.create_dataset("states", data=state[None])
+                group.create_dataset("diagnostics/handle_angle", data=[0.])
+                for key in ("diagnostics/actual_tcp", "datagen_info/object_poses/faucet", "datagen_info/object_poses/handle"):
+                    group.create_dataset(key, data=np.eye(4)[None])
+                for key, value in (("robot0_base_pos", [0., 0., 0.]), ("robot0_base_quat", [0., 0., 0., 1.]),
+                                   (evaluation.LOWDIM[0], [0., 0., 0.]), (evaluation.LOWDIM[1], [0., 0., 0., 1.])):
+                    group.create_dataset("obs/" + key, data=np.asarray(value)[None])
+                for key in evaluation.RGB:
+                    group.create_dataset("obs/" + key, data=np.full((1, 128, 128, 3), 128, dtype=np.uint8))
 
     @staticmethod
     def restored_fixture(group):
-        """A saved-data-backed fake; no MuJoCo imports, compilation or stepping."""
+        """A synthetic saved-state fake; no compilation or simulation stepping."""
         state = group["states"][0]
         xml = group.attrs["model_file"]
         joints, offset = {}, 1
@@ -57,10 +101,9 @@ class FaucetGridTests(unittest.TestCase):
         base = evaluation.tcp_pose(group["obs/robot0_base_pos"][0], group["obs/robot0_base_quat"][0])
         return env, interface, initial, base
 
-    def test_actual_held_out_starts_and_close_single_door_seeds(self):
+    def test_saved_held_out_starts_and_close_single_door_seed_order(self):
         configurations = evaluation.validation_configurations(DATASET, evaluation.VALIDATION_DEMOS)
-        close = json.loads((PROJECT / "experiment_results/CloseSingleDoor/rollouts/rby1_relative_final_125_eval/metadata.json").read_text())
-        self.assertEqual(evaluation.GRID_SEEDS, close["seeds"])
+        self.assertEqual(evaluation.GRID_SEEDS, [0, 1, 42, 123, 12345, *range(2, 22)])
         self.assertEqual(len(configurations) * len(evaluation.GRID_SEEDS), 125)
         self.assertEqual(len({c["state_sha256"] for c in configurations}), 5)
         self.assertEqual(len({tuple(c["fixture_position"]) for c in configurations}), 5)
