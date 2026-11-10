@@ -14,7 +14,6 @@ sampled uniformly per attempt (one value keeps them fixed). The sampled values
 are in attempts.csv. Base placement noise is off by default: even a few cm / deg
 puts the end of the push out of the left arm's reach.
 """
-from rby1.paths import REPOSITORY_ROOT
 import argparse
 import csv
 import itertools
@@ -26,7 +25,7 @@ import numpy as np
 
 from rby1.demos.collect_close_door_demos import all_style_ids, run_and_log, spread_order, write_manifest
 
-DEFAULT_SCRIPT = (REPOSITORY_ROOT / "mobipi/collect_demos/auto_close_drawer.py")
+DEFAULT_SCRIPT = Path(__file__).resolve().with_name("auto_close_drawer.py")
 EXIT_SUCCESS, EXIT_SKIPPED = 0, 3
 # Scripted motion parameters of auto_close_drawer.py that can be randomized per attempt
 MOTION_PARAMS = ["push_edge_inset", "contact_z_offset", "tool_pitch", "push_lead"]
@@ -119,8 +118,9 @@ def main():
         rng = np.random.default_rng(seed)
         motion = {name: sample_param(getattr(args, name), rng) for name in MOTION_PARAMS}
 
+        entry = [sys.executable, "-m", "rby1.demos.auto_close_drawer"] if script == DEFAULT_SCRIPT.resolve() else [sys.executable, str(script)]
         cmd = [
-            sys.executable, str(script),
+            *entry,
             "--environment", "CloseDrawerLeft",
             "--layout", str(layout),
             "--style", str(style),

@@ -1,6 +1,6 @@
 r"""Run the complete RB-Y1 pipeline over seeds and save resumable results.
 
-Other options are forwarded to run_rby1_pipeline; --scene-dir is required and
+Other options are forwarded to rby1.pipeline.run; --scene-dir is required and
 --task selects the task (default close_microwave). For example, from the
 repository root in the mobipi_pipeline environment:
 

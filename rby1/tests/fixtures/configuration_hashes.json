@@ -1,8 +1,0 @@
-{
-  "rby1/configs/faucet_relative_cartesian_dp.json": "4881005b30b08b6041b1d5e43fc18de666bb611f76c4096e18b5b07eb8ec342d",
-  "rby1/configs/faucet_relative_cartesian_dp_extended.json": "79f08c55c2823821d4766fee951082284a32b001a092230b4b8340193fb1aa5d",
-  "rby1/configs/faucet_config.json": "0caa9289f2315ae19e1295936b3feda6e8c049b9ce063f25f77de7407b590bf0",
-  "rby1/configs/faucet_mimicgen_diverse_config.json": "5476b86ca03a7aa89bbbe709f876a407fde01079ba195cb45f9f67ed5d4e6e4b",
-  "rby1/configs/mimicgen/CloseDrawerLeft_RBY1_300mg.json": "915b769bf5d8dc1272ce8d1f63f4aaa917853caf52c83885132211d73c79eb98",
-  "rby1/configs/mimicgen/CloseSingleDoor_RBY1_surface_layout1_115mg.json": "7358c10d512cf415bc0a1928b29ccca970df2c042b9014c20ce200abc5bb32f9"
-}

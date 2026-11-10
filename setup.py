@@ -14,10 +14,6 @@ setup(
         include=("mobipi", "mobipi.*", "rby1", "rby1.*"),
         exclude=("*.__pycache__",),
     ),
-    package_data={
-        "rby1": ["configs/*.json", "configs/mimicgen/*.json", "tests/fixtures/*.json"],
-        "mobipi.collect_demos": ["*.json"],
-    },
     install_requires=[
     ],
     classifiers=[

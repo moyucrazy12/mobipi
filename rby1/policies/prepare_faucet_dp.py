@@ -4,7 +4,6 @@ Store absolute base-center TCP commands; the native dataset creates relative
 labels for each prediction window. Preserve scalar gripper commands separately.
 No simulator, IK, resampling, or observation/action time shift is used.
 """
-from rby1.paths import CONFIG_ROOT
 import argparse
 from collections import Counter
 import hashlib
@@ -112,7 +111,7 @@ def validate_training(config_path, report):
     from robomimic.config import config_factory
     from robomimic.utils import obs_utils, train_utils
     from robomimic.utils import tensor_utils
-    settings = resolve_training_paths(json.loads(config_path.read_text()), dataset=report["dataset"])
+    settings = resolve_training_paths(json.loads(config_path.expanduser().read_text()), dataset=report["dataset"])
     config = config_factory(settings["algo_name"])
     with config.values_unlocked():
         config.update(settings)
@@ -161,7 +160,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=new_output("demos", "faucet_relative_cartesian") / "train.hdf5")
-    parser.add_argument("--config", type=Path, default=(CONFIG_ROOT / "faucet_relative_cartesian_dp.json"))
+    parser.add_argument("--config", type=Path, required=True, help="External Diffusion Policy training JSON")
     parser.add_argument("--report", type=Path, default=new_output("diagnostics", "faucet_preparation", ".json"))
     parser.add_argument("--validate-only", action="store_true", help="Check an already converted file without reconverting")
     args = parser.parse_args()
@@ -170,6 +169,7 @@ def main():
     if args.validate_only:
         with h5py.File(args.output, "r") as f:
             report = json.loads(f["data"].attrs["faucet_dp_conversion"])
+            report["dataset"] = str(args.output.expanduser().resolve())
             train_names = set(f["mask/train"].asstr()[:])
             report["episodes"] = [dict(name=name, steps=int(ep.attrs["num_samples"]),
                 source=json.loads(ep.attrs["source_demo_names"])[0],

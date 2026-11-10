@@ -1,5 +1,4 @@
 """Prepare, validate, replay and expand faucet seeds through installed MimicGen."""
-from rby1.paths import CONFIG_ROOT
 import argparse
 from contextlib import contextmanager
 import json
@@ -301,16 +300,20 @@ def main():
     parser.add_argument("stage", choices=["prepare", "validate", "generate", "replay", "execute-source"])
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--output", type=Path)
-    parser.add_argument("--config", type=Path, default=(CONFIG_ROOT / "faucet_config.json"))
+    parser.add_argument("--config", type=Path, help="External faucet task JSON; required for generation and replay")
     parser.add_argument("--prepared", action="store_true")
     parser.add_argument("--target-successes", type=int, default=1)
     parser.add_argument("--max-attempts", type=int, default=1)
     parser.add_argument("--demo", default="demo_0")
     args = parser.parse_args()
-    config = json.loads(args.config.read_text())
     if args.stage == "validate":
         print(json.dumps(validate(args.source, args.prepared), indent=2))
         return
+    config = None
+    if args.stage != "prepare":
+        if args.config is None:
+            parser.error("--config is required for generate, replay and execute-source")
+        config = json.loads(args.config.expanduser().read_text())
     if args.output is None:
         if args.stage == "prepare":
             args.output = new_output("demos", "faucet_source", ".hdf5")

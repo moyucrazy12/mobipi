@@ -9,7 +9,7 @@ class PipelineTask:
     """
     Everything the pipeline needs to know about one task. Subclass it and add
     the subclass to rby1.pipeline.tasks.TASKS to run the task with
-    run_rby1_pipeline.py / evaluate_rby1_pipeline.py (--task <name>).
+    rby1.pipeline.run / rby1.pipeline.evaluate (--task <name>).
 
     Task completion is a scalar progress (higher is closer to done) that
     succeeds at success_threshold; the pipeline stops the policy once it has

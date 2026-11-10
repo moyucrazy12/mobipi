@@ -1,4 +1,3 @@
-from rby1.paths import REPOSITORY_ROOT
 #!/usr/bin/env python3
 import argparse
 import csv
@@ -8,7 +7,7 @@ import sys
 from pathlib import Path
 import robocasa.models.scenes.scene_registry as SceneRegistry
 
-DEFAULT_SCRIPT = (REPOSITORY_ROOT / "mobipi/collect_demos/auto_close_microwave_door.py")
+DEFAULT_SCRIPT = Path(__file__).resolve().with_name("auto_close_microwave_door.py")
 
 def all_style_ids():
     styles = [int(x) for x in SceneRegistry.unpack_style_ids(None)]
@@ -101,8 +100,9 @@ def main():
         log_path = logs_dir / f"{tag}.log"
         shutil.rmtree(attempt_dir, ignore_errors=True)
 
+        entry = [sys.executable, "-m", "rby1.demos.auto_close_microwave_door"] if script == DEFAULT_SCRIPT.resolve() else [sys.executable, str(script)]
         cmd = [
-            sys.executable, str(script),
+            *entry,
             "--environment", "CloseSingleDoor",
             "--layout", str(args.layout),
             "--style", str(style),

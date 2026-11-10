@@ -6,7 +6,6 @@ from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = REPOSITORY_ROOT.parent
-CONFIG_ROOT = REPOSITORY_ROOT / "rby1/configs"
 TASK = "TurnOnFaucet"
 
 

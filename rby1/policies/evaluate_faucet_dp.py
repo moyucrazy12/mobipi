@@ -1,5 +1,4 @@
 """Autonomous faucet evaluation using native relative DP and the proven IK executor."""
-from rby1.paths import CONFIG_ROOT
 import argparse
 from collections import deque
 import hashlib
@@ -596,8 +595,12 @@ def main():
     parser.add_argument("--output", type=Path)
     parser.add_argument("--check-only", action="store_true", help="One offline checkpoint/input/action check; no environment")
     parser.add_argument("--dataset", type=Path, default=historical_path("demos", "faucet_relative_cartesian_100", "train.hdf5"))
-    parser.add_argument("--task-config", type=Path, default=(CONFIG_ROOT / "faucet_config.json"))
+    parser.add_argument("--task-config", type=Path, help="External faucet task JSON; required except for --check-only")
     args = parser.parse_args()
+    if not args.check_only and args.task_config is None:
+        parser.error("--task-config is required for rollout and validation-grid evaluation")
+    if args.task_config is not None:
+        args.task_config = args.task_config.expanduser().resolve()
     args.seeds = args.seeds if args.seeds is not None else (GRID_SEEDS.copy() if args.initialization == "validation" else [0, 1, 42])
     if len(set(args.seeds)) != len(args.seeds) or min(args.seeds) < 0 or max(args.seeds) >= 2**32:
         parser.error("Diffusion seeds must be unique integers in [0, 2**32)")

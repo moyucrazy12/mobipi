@@ -3,7 +3,7 @@ r"""Select a base pose with Mobi-pi, navigate RB-Y1 there, then run its policy.
 Run from the repository root in an environment with the policy and mobilization
 dependencies installed. The dataset must contain RGB observations and a train
 mask; the scene directory must contain pc.ply and a trained splatfacto model.
---task selects the task module (mobipi/pipeline/tasks) and its default
+--task selects the task module (rby1/pipeline/tasks) and its default
 checkpoint and dataset.
 
     python -m rby1.pipeline.run --task close_microwave \

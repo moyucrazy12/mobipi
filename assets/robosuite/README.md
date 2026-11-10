@@ -99,9 +99,10 @@ else:
 ```
 
 ## Verification
-To ensure the model was imported correctly, run the `rby1_import_test.py` file, which opens a Robosuite environment called 'Lift'.
-You should see the robot from the front view executing a waving maneuver.
+Check model registration after installation:
 
 ```bash
-python assets/robosuite/rby1_import_test.py
+python -c "from robosuite.models.robots.robot_model import REGISTERED_ROBOTS; assert 'RBY1' in REGISTERED_ROBOTS"
 ```
+
+See [the RB-Y1 guide](../../rby1/README.md) for demonstration and policy commands.

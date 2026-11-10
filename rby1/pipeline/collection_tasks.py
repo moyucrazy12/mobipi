@@ -1,5 +1,4 @@
 """Small registry of task adapters; simulator imports occur only during rollouts."""
-from rby1.paths import CONFIG_ROOT
 from dataclasses import dataclass
 import importlib
 import itertools
@@ -11,8 +10,6 @@ import random
 @dataclass(frozen=True)
 class Task:
     active_arm: str
-    seed_config: str
-    augmentation_config: str
     collect: str
     prepare: str
     augment: str
@@ -53,12 +50,9 @@ def faucet_attempt_config(config, stage, index, source, translation, rotation):
     return config, {"seed": mg["seed"], "fixture_offset": offset, "source_demo_keys": keys}
 
 
-_HERE = CONFIG_ROOT
 TASKS = {
     "TurnOnSinkFaucet": Task(
         active_arm="right",
-        seed_config=str(_HERE / "faucet_config.json"),
-        augmentation_config=str(_HERE / "faucet_mimicgen_diverse_config.json"),
         collect="rby1.demos.collect_faucet_demos:collect",
         prepare="rby1.demos.faucet_pipeline:prepare",
         augment="rby1.demos.faucet_pipeline:generate",

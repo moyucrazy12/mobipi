@@ -1,5 +1,4 @@
 """Scripted right-arm faucet seeds, using the existing collector's IK/action helpers."""
-from rby1.paths import CONFIG_ROOT
 import argparse
 import json
 import math
@@ -433,12 +432,12 @@ def collect(config, output, count, max_attempts):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, default=(CONFIG_ROOT / "faucet_config.json"))
+    parser.add_argument("--config", type=Path, required=True, help="External faucet task JSON from the team's private configuration folder")
     parser.add_argument("--output", type=Path, default=new_output("demos", "faucet_seeds"))
     parser.add_argument("--count", type=int, default=1)
     parser.add_argument("--max-attempts", type=int, default=1)
     args = parser.parse_args()
-    raise SystemExit(0 if collect(json.loads(args.config.read_text()), args.output, args.count, args.max_attempts) else 1)
+    raise SystemExit(0 if collect(json.loads(args.config.expanduser().read_text()), args.output, args.count, args.max_attempts) else 1)
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@
 Scripted RB-Y1 demo for CloseDrawerLeft: push the open drawer shut with the left arm.
 
 The robot starts at RoboCasa's drawer placement, always to the right of the
-drawer (mobipi.envs.CloseDrawerLeft), squatting with the head turned toward
+drawer (rby1.robot.kitchen_drawer.CloseDrawerLeft), squatting with the head turned toward
 the drawer (the env resets into rby1_utils.TORSO_POSES / HEAD_POSES). The left
 gripper approaches the drawer front near the edge closest to the robot, finds
 contact, and pushes along the drawer's slide axis until the task succeeds.
@@ -29,19 +29,17 @@ from robosuite.wrappers import DataCollectionWrapper
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import rby1.robot.kitchen_drawer  # noqa: F401  registers CloseDrawerLeft
 from rby1.robot import navigation as rby1_utils
+from rby1.robot.controllers import build_controller_interface, execute_target, set_ik_q0_from_current_pose
 from rby1.demos.auto_close_microwave_door import (
     DEFAULT_CONTROLLER,
-    build_controller_interface,
     door_facing_rotation,
     door_surface_contacts,
-    execute_target,
     interpolate_rotation,
     lerp_points,
     normalize,
     raw_data,
     raw_model,
     rotation_error,
-    set_ik_q0_from_current_pose,
     site_pose,
     unwrap_env,
 )

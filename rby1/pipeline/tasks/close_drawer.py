@@ -1,4 +1,4 @@
-"""CloseDrawerLeft (mobipi/envs/kitchen_drawer.py); progress is minus the drawer opening."""
+"""CloseDrawerLeft (rby1/robot/kitchen_drawer.py); progress is minus the drawer opening."""
 
 import numpy as np
 

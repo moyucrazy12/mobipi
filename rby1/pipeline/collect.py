@@ -265,8 +265,7 @@ def main():
         parser.error("No saved run exists at --output")
     settings = dict(saved) if args.resume else {"task": args.task, "seeds": 10, "augment": 100,
         "translation": .02, "rotation_deg": 2., "seed_dataset": None, "prepared_dataset": None, "augmented_dataset": None,
-        "seed_config": json.loads(Path(task.seed_config).read_text()),
-        "augmentation_config": json.loads(Path(task.augmentation_config).read_text())}
+        "seed_config": None, "augmentation_config": None}
     settings["task"] = args.task
     for key in ("seeds", "augment", "seed_attempts", "augment_attempts", "translation", "rotation_deg"):
         if getattr(args, key) is not None:
@@ -274,7 +273,14 @@ def main():
     for key in ("seed_dataset", "prepared_dataset", "augmented_dataset", "seed_config", "augmentation_config"):
         value = getattr(args, key)
         if value is not None:
-            settings[key] = json.loads(value.read_text()) if key.endswith("config") else str(value.resolve())
+            settings[key] = json.loads(value.expanduser().read_text()) if key.endswith("config") else str(value.expanduser().resolve())
+    needs_collect = (args.stage == "collect" and not settings.get("seed_dataset")) or (args.stage == "all" and not any(
+        settings.get(key) for key in ("seed_dataset", "prepared_dataset", "augmented_dataset")))
+    needs_augment = args.stage in ("augment", "all") and not settings.get("augmented_dataset")
+    if needs_collect and not settings.get("seed_config"):
+        parser.error("--seed-config is required when collecting new demonstrations")
+    if needs_augment and not settings.get("augmentation_config"):
+        parser.error("--augmentation-config is required when generating new MimicGen demonstrations")
     settings.setdefault("seed_attempts", 3 * settings["seeds"])
     settings.setdefault("augment_attempts", 3 * settings["augment"])
     for key in ("seed_dataset", "prepared_dataset", "augmented_dataset"):

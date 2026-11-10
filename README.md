@@ -6,9 +6,8 @@ Jingyun Yang, Isabella Huang*, Brandon Vu*, Max Bajracharya, Rika Antonova, Jean
 
 ![The Policy Mobilization Problem](assets/github_teaser.gif)
 
-Team RB-Y1 simulation extensions are documented in [rby1/README.md](rby1/README.md).
-Original MobiPi modules remain available; previous RB-Y1 commands and imports
-continue through compatibility entry points.
+RB-Y1 simulation workflows and external configuration requirements are documented
+in [rby1/README.md](rby1/README.md).
 
 ## 1 Introduction
 
