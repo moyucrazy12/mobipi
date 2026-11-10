@@ -1,4 +1,4 @@
-"""CPU-only orchestration tests using one existing recorded episode, without envs."""
+"""CPU-only recovery tests with a synthetic episode; no task-success claim."""
 import json
 from pathlib import Path
 import shutil
@@ -20,15 +20,29 @@ class PipelineTests(unittest.TestCase):
         cls.temporary = tempfile.TemporaryDirectory()
         cls.addClassCleanup(cls.temporary.cleanup)
         cls.fixture = Path(cls.temporary.name) / "episode.hdf5"
-        existing = Path(__file__).resolve().parents[3] / "data/faucet_mg_diverse_100/generated.hdf5"
-        if not existing.exists():
-            raise unittest.SkipTest("Existing validated faucet recording is required")
-        with h5py.File(existing, "r") as src, h5py.File(cls.fixture, "x") as dest:
+        with h5py.File(cls.fixture, "x") as dest:
             data = dest.create_group("data")
-            for key, value in src["data"].attrs.items():
-                data.attrs[key] = value
-            src.copy(src["data/demo_0"], data, name="demo_0")
-            data.attrs["total"] = data["demo_0"].attrs["num_samples"]
+            n = 8
+            data.attrs.update(total=n, env_args=json.dumps({"env_name": "TurnOnSinkFaucetRBY1"}),
+                              source_demo_keys=json.dumps(["seed_0", "seed_1"]))
+            ep = data.create_group("demo_0")
+            ep.attrs.update(num_samples=n, success=True, model_file="synthetic", ep_meta="{}", origin="test")
+            for name, shape in (("actions", (n, 24)), ("states", (n, 40)),
+                                ("rewards", (n,)), ("dones", (n,)),
+                                ("obs/robot0_right_joint_pos", (n, 7)),
+                                ("obs/faucet_overview_image", (n, 8, 8, 3))):
+                ep.create_dataset(name, data=np.zeros(shape))
+            poses = np.repeat(np.eye(4)[None], n, axis=0)
+            for name in ("diagnostics/commanded_tcp", "datagen_info/eef_pose", "datagen_info/target_pose",
+                         "datagen_info/object_poses/faucet", "datagen_info/object_poses/handle"):
+                ep.create_dataset(name, data=poses)
+            ep.create_dataset("diagnostics/water_on", data=[0, 0, 0, 0, 0, 1, 1, 1])
+            ep.create_dataset("diagnostics/phase", data=np.asarray(["synthetic"] * n, dtype="S"))
+            ep.create_dataset("datagen_info/gripper_action", data=np.ones((n, 1)))
+            ep.create_dataset("datagen_info/subtask_term_signals/contact", data=[0, 0, 1, 1, 1, 1, 0, 0])
+            ep.create_dataset("datagen_info/subtask_term_signals/water_on", data=[0, 0, 0, 0, 0, 1, 1, 1])
+            ep.create_dataset("src_demo_inds", data=np.ones(n, dtype=int))
+        validate(cls.fixture, prepared=True)
 
     def test_resume_recovers_flushed_episode_and_partial_preparation(self):
         fixture = self.fixture
