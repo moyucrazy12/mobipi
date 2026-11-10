@@ -56,6 +56,8 @@ model. Its RoboSuite registry lacks `RBY1MobileBase`, which the mobile pipeline
 requires. Prepare the mobile profile in a **separate Conda environment** using
 `assets/robosuite/install_rby1.sh /path/to/that/environment`; do not silently
 replace the working faucet profile. Mobile execution remains unverified here.
+The tested historical model revisions, package versions and file hashes are
+recorded in [environment.json](../docs/codebase_cleanup/environment.json).
 
 ## Demonstrations and MimicGen
 

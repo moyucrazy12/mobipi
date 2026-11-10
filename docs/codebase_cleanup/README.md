@@ -77,6 +77,13 @@ grids remain unverified. Historical/default config artifact paths sometimes
 require explicit overrides. Existing evaluation manifests fingerprint source
 code; start new evaluation output directories after moving implementations.
 
+[environment.json](environment.json) records actual package versions and hashes
+of the tested installed model files. The robot Python file matches tracked
+revision `4c2ff9f`, robot XML matches `62f460a`, and gripper/mount files match
+`166be92`. This identifies the historical simulation profile used by the checks;
+it does not infer a physical hardware version or copy installed source into
+the new package. The current tracked mobile-model assets are a separate profile.
+
 ## Incremental history
 
 Commits record the audit before any moves, then demo/policy/config migration,
