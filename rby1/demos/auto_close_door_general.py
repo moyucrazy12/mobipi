@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 
 import argparse
+from rby1.robot.sim_utils import (
+    raw_model, raw_data, forward, normalize, smoothstep,
+    site_pose, make_T, interpolate_rotation, arm_joint_names, force_tangent_direction,
+)
 import json
 import os
 
@@ -30,20 +34,6 @@ DEFAULT_CONTROLLER = str(
 # Generic utilities
 # -----------------------------------------------------------------------------
 
-def raw_model(sim):
-    return sim.model._model if hasattr(sim.model, "_model") else sim.model
-
-
-def raw_data(sim):
-    return sim.data._data if hasattr(sim.data, "_data") else sim.data
-
-
-def forward(sim):
-    try:
-        sim.forward()
-    except Exception:
-        mujoco.mj_forward(raw_model(sim), raw_data(sim))
-
 
 def unwrap_env(env):
     base = env
@@ -52,52 +42,17 @@ def unwrap_env(env):
     return base
 
 
-def normalize(v, eps=1e-9):
-    v = np.asarray(v, dtype=float)
-    n = np.linalg.norm(v)
-    if n < eps:
-        raise RuntimeError(f"Cannot normalize vector {v}")
-    return v / n
-
-
-def smoothstep(t):
-    return 3.0 * t**2 - 2.0 * t**3
-
-
 def lerp_points(a, b, n):
     a, b = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
     return np.array([a + smoothstep(t) * (b - a) for t in np.linspace(0, 1, max(n, 2))])
-
-
-def site_pose(sim, name):
-    m, d = raw_model(sim), raw_data(sim)
-    sid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SITE, name)
-    if sid < 0:
-        raise RuntimeError(f"Site not found: {name}")
-    pos = np.asarray(d.site_xpos[sid], dtype=float).copy()
-    mat = np.asarray(d.site_xmat[sid], dtype=float).reshape(3, 3).copy()
-    return pos, mat
 
 
 def rotation_error(R_actual, R_target):
     return np.linalg.norm(Rotation.from_matrix(R_target @ R_actual.T).as_rotvec())
 
 
-def make_T(pos, rot):
-    T = np.eye(4)
-    T[:3, :3] = rot
-    T[:3, 3] = pos
-    return T
-
-
 def pose6(position, rotation_matrix):
     return np.concatenate([position, Rotation.from_matrix(rotation_matrix).as_rotvec()])
-
-
-def interpolate_rotation(R0, R1, t):
-    relative = R1 @ R0.T
-    rotvec = Rotation.from_matrix(relative).as_rotvec()
-    return Rotation.from_rotvec(t * rotvec).as_matrix() @ R0
 
 
 def other_arm(arm):
@@ -110,10 +65,6 @@ def arm_site(arm):
 
 def arm_wrist_site(arm):
     return f"gripper0_{arm}_ft_frame"
-
-
-def arm_joint_names(arm):
-    return [f"robot0_{arm}_arm_{i}" for i in range(7)]
 
 
 # -----------------------------------------------------------------------------
@@ -384,12 +335,6 @@ def closing_tangent(hinge_pos, hinge_axis, point, theta_delta_sign):
     tangent = np.cross(hinge_axis, point - hinge_pos)
     tangent *= theta_delta_sign
     return normalize(tangent)
-
-
-def force_tangent_direction(tangent, push_x_direction):
-    if push_x_direction != 0 and np.sign(tangent[0]) != push_x_direction:
-        tangent = -tangent
-    return tangent
 
 
 def door_facing_rotation(hinge_axis, door_normal, T_tcp_wrist):

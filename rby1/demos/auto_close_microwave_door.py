@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 import argparse
+from rby1.robot.sim_utils import (
+    raw_model, raw_data, forward, normalize, smoothstep,
+    site_pose, make_T, interpolate_rotation, arm_joint_names, force_tangent_direction,
+)
 import os
 from pathlib import Path
 import mujoco
@@ -14,17 +18,6 @@ from robosuite.wrappers import DataCollectionWrapper
 DEFAULT_CONTROLLER = str(Path(robosuite.__file__).resolve().parent / "controllers/config/robots/default_rby1_whole_body_ik.json")
 DOOR_SURFACE_INSET = 0.06  # 6 cm from handle toward hinge: flat door surface
 
-def raw_model(sim):
-    return sim.model._model if hasattr(sim.model, '_model') else sim.model
-
-def raw_data(sim):
-    return sim.data._data if hasattr(sim.data, '_data') else sim.data
-
-def forward(sim):
-    try:
-        sim.forward()
-    except Exception:
-        mujoco.mj_forward(raw_model(sim), raw_data(sim))
 
 def unwrap_env(env):
     base = env
@@ -40,15 +33,6 @@ def unwrap_env(env):
             return base
         base = inner
 
-def normalize(v, eps=1e-09):
-    v = np.asarray(v, dtype=float)
-    n = np.linalg.norm(v)
-    if n < eps:
-        raise RuntimeError(f'Cannot normalize vector {v}')
-    return v / n
-
-def smoothstep(t):
-    return 3.0 * t ** 2 - 2.0 * t ** 3
 
 def lerp_points(a, b, n):
     a, b = (np.asarray(a), np.asarray(b))
@@ -79,14 +63,6 @@ def rotation_error(R_actual, R_target):
     Rerr = R_target @ R_actual.T
     return np.linalg.norm(Rotation.from_matrix(Rerr).as_rotvec())
 
-def site_pose(sim, name):
-    m, d = (raw_model(sim), raw_data(sim))
-    sid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SITE, name)
-    if sid < 0:
-        raise RuntimeError(f'Site not found: {name}')
-    pos = np.asarray(d.site_xpos[sid], dtype=float).copy()
-    mat = np.asarray(d.site_xmat[sid], dtype=float).reshape(3, 3).copy()
-    return (pos, mat)
 
 def object_position(sim, name):
     """Try site -> geom -> body."""
@@ -313,10 +289,6 @@ def pose6(position, rotation_matrix):
     rotvec = Rotation.from_matrix(rotation_matrix).as_rotvec()
     return np.concatenate([position, rotvec])
 
-def interpolate_rotation(R0, R1, t):
-    relative = R1 @ R0.T
-    rotvec = Rotation.from_matrix(relative).as_rotvec()
-    return Rotation.from_rotvec(t * rotvec).as_matrix() @ R0
 
 def set_ik_q0_from_current_pose(base_env, robot):
     if not isinstance(robot.composite_controller, WholeBody):
@@ -325,11 +297,6 @@ def set_ik_q0_from_current_pose(base_env, robot):
     ik.q0 = np.array([float(base_env.sim.data.get_joint_qpos(name)) for name in ik.joint_names])
     print('\nIK q0:', np.round(ik.q0, 3))
 
-def make_T(pos, rot):
-    T = np.eye(4)
-    T[:3, :3] = rot
-    T[:3, 3] = pos
-    return T
 
 def pose_target_for_ref(tcp_pos, tcp_rot, T_tcp_ref):
     T_world_ref = make_T(tcp_pos, tcp_rot) @ T_tcp_ref
@@ -341,8 +308,6 @@ def arm_tcp_site(arm):
 def arm_default_ref_site(arm):
     return f"gripper0_{arm}_ft_frame"
 
-def arm_joint_names(arm):
-    return [f"robot0_{arm}_arm_{i}" for i in range(7)]
 
 def whole_body_arm_refs(controller_config):
     specific = controller_config.get("composite_controller_specific_configs", {})
@@ -479,10 +444,6 @@ def door_surface_contacts(base_env, fixture_name, push_point, radius=0.10):
             contacts.append((g1, g2, dist))
     return contacts
 
-def force_tangent_direction(tangent, push_x_direction):
-    if push_x_direction != 0 and np.sign(tangent[0]) != push_x_direction:
-        tangent = -tangent
-    return tangent
 
 def run(args):
     controller_config = load_composite_controller_config(controller=args.controller, robot="RBY1")
