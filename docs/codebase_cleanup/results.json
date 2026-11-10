@@ -25,5 +25,12 @@
   },
   "historical_clis": 21,
   "skip_reason": "Installed RoboSuite lacks RBY1MobileBase; same prerequisite absent before and after",
-  "production_dependency_changes": false
+  "production_dependency_changes": false,
+  "committed_checkout_verification": {
+    "commit": "3bc16e651537b5acaa6911cb162af5a81802170d",
+    "run": 104,
+    "passed": 103,
+    "skipped": 1,
+    "source_copied_from_untracked_files": false
+  }
 }

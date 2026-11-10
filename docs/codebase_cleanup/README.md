@@ -53,6 +53,8 @@ is merged by this task.
 - Before moves: 90 tests passed, 21 historical CLI checks passed, scripted
   faucet collection and native MimicGen generation each succeeded 1/1, real
   checkpoint load/inference passed.
+- A fresh committed checkout at `3bc16e6`, with all six exact gitlinks and
+  external simulation assets supplied separately, reproduced the full result.
 - After cleanup: 104 tests run, **103 passed and 1 skipped**; 51 legacy discovery
   tests also passed. All 21 CLI checks pass; help is equivalent after replacing
   moved module names in examples. Direct legacy scripts work from another cwd.
