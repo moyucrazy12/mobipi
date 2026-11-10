@@ -31,5 +31,13 @@
   "mobipi/pipeline/tasks/base.py": "rby1/pipeline/tasks/base.py",
   "mobipi/pipeline/tasks/__init__.py": "rby1/pipeline/tasks/__init__.py",
   "configs/mimicgen/CloseDrawerLeft_RBY1_300mg.json": "rby1/configs/mimicgen/CloseDrawerLeft_RBY1_300mg.json",
-  "configs/mimicgen/CloseSingleDoor_RBY1_surface_layout1_115mg.json": "rby1/configs/mimicgen/CloseSingleDoor_RBY1_surface_layout1_115mg.json"
+  "configs/mimicgen/CloseSingleDoor_RBY1_surface_layout1_115mg.json": "rby1/configs/mimicgen/CloseSingleDoor_RBY1_surface_layout1_115mg.json",
+  "mobipi/collect_demos/tests/test_faucet_runtime.py": "rby1/tests/test_faucet_runtime.py",
+  "mobipi/collect_demos/tests/test_pipeline.py": "rby1/tests/test_pipeline.py",
+  "mobipi/collect_demos/tests/test_faucet_progress.py": "rby1/tests/test_faucet_progress.py",
+  "mobipi/collect_demos/tests/test_release_integration.py": "rby1/tests/test_release_integration.py",
+  "mobipi/collect_demos/tests/test_faucet_dataset.py": "rby1/tests/test_faucet_dataset.py",
+  "mobipi/collect_demos/tests/test_faucet_evaluation_grid.py": "rby1/tests/test_faucet_evaluation_grid.py",
+  "mobipi/collect_demos/tests/test_faucet_reset.py": "rby1/tests/test_faucet_reset.py",
+  "mobipi/collect_demos/tests/test_faucet_bounded_ik.py": "rby1/tests/test_faucet_bounded_ik.py"
 }

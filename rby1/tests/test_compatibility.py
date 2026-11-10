@@ -1,7 +1,11 @@
 """A legacy import must share globals and classes with its canonical module."""
 import importlib
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -9,6 +13,27 @@ from rby1.paths import REPOSITORY_ROOT
 
 
 class CompatibilityTests(unittest.TestCase):
+    def test_task_registry_and_child_modules_keep_identity(self):
+        legacy = importlib.import_module("mobipi.pipeline.tasks")
+        canonical = importlib.import_module("rby1.pipeline.tasks")
+        self.assertIs(legacy.TASKS, canonical.TASKS)
+        for name in ("base", "close_drawer", "close_microwave"):
+            self.assertIs(importlib.import_module("mobipi.pipeline.tasks." + name),
+                          importlib.import_module("rby1.pipeline.tasks." + name))
+
+    def test_legacy_direct_scripts_work_from_another_directory(self):
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.pathsep.join(str(REPOSITORY_ROOT / "external" / name)
+                                          for name in ("robomimic", "mimicgen", "robocasa"))
+        with tempfile.TemporaryDirectory() as temporary:
+            for script in ("mobipi/collect_demos/collect_faucet_demos.py",
+                           "mobipi/collect_demos/collect_close_drawer_demos.py",
+                           "mobipi/scripts/run_rby1_pipeline.py"):
+                result = subprocess.run([sys.executable, str(REPOSITORY_ROOT / script), "--help"],
+                                        cwd=temporary, env=env, capture_output=True, text=True, timeout=45)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("usage:", result.stdout)
+
     def test_legacy_modules_share_identity_and_patch_targets(self):
         migration = json.loads((REPOSITORY_ROOT / "docs/codebase_cleanup/migration.json").read_text())
         for old, new in migration.items():
