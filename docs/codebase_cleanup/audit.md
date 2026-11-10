@@ -25,6 +25,7 @@ including SDK work, are outside this cleanup. No branch history is discarded.
 | Faucet | `8692c27`, `53aaa86`, integration/test commits through `8ca5c75`; David Iosifescu | Right-arm task adapter, bounded IK, recording, validation, scoped MimicGen executor, policies and reports belong to `rby1` |
 | Mobilization/pipeline | `37446e7`, `aa25307`, `8e88c83`, `b763e02`, `3bf9d93`; Josef Kahoun, moyucrazy12 | RB-Y1 base/controller adaptations, task registry, policy execution/arm return and result orchestration move; import generic MobiPi scoring/planning |
 | Shared scoring | `c94e1cc` changes `mobipi/utils/score_utils.py` | Retain the shared framework implementation; a team edit does not make the entire scorer robot-specific |
+| Shared scene loading | `37446e7` adds `SceneModel._relocate_config` | Portable checkpoint path repair is useful to generic MobiPi scene models; retain it in `mobipi/scene_model/scene_model.py` |
 | RoboMimic Cartesian/relative policy | `b95529f`, `0e81bbf`, `4bac77a`, `03b728c`, `ea5d80b`, `e226662` | Retain native algorithm/dataset hooks and geometry used by checkpoint loading and standalone RoboMimic commands; import them from RB-Y1 policy entry points |
 | MimicGen team interfaces | `e4283cf`, `c5d76e9`, `80f4a9c`, `edbaff9` | Retain native interface registration and door/drawer adapters in the dependency; faucet's scoped adapter remains in the superproject |
 
@@ -61,6 +62,14 @@ must remain stable. Native submodule commands must not acquire a dependency on
 the new superproject package.
 
 ## Duplication decisions
+
+The broader [baseline scan](duplicates_extended.json) covers all 108 tracked
+Python/JSON paths touched in reachable team history across MobiPi, RoboMimic
+and MimicGen. It finds no exact nonempty files and 12 top-level function
+groups: the 11 door-script matches below plus cross-repository
+`experiment_root`. The latter depends on each module's own `PROJECT_ROOT`
+binding and standalone installation/layout, so sharing it would change path
+discovery or couple independently installed checkouts. Retain it intentionally.
 
 [duplicates.json](duplicates.json) is the pre-move AST comparison. No exact
 duplicate top-level Python files were found. Eleven top-level functions have

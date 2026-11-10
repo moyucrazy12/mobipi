@@ -1,0 +1,180 @@
+{
+  "scope": "Tracked Python/JSON paths touched by reachable team-authored commits at the recorded baseline, including shared framework modifications",
+  "paths_scanned": {
+    "mobipi": 52,
+    "robomimic": 49,
+    "mimicgen": 7,
+    "robocasa": 0
+  },
+  "exact_nonempty_files": [],
+  "exact_top_level_functions": [
+    [
+      {
+        "repository": "mobipi",
+        "path": "mobipi/collect_demos/auto_close_door_general.py",
+        "function": "raw_model",
+        "line": 33
+      },
+      {
+        "repository": "mobipi",
+        "path": "mobipi/collect_demos/auto_close_microwave_door.py",
+        "function": "raw_model",
+        "line": 17
+      }
+    ],
+    [
+      {
+        "repository": "mobipi",
+        "path": "mobipi/collect_demos/auto_close_door_general.py",
+        "function": "raw_data",
+        "line": 37
+      },
+      {
+        "repository": "mobipi",
+        "path": "mobipi/collect_demos/auto_close_microwave_door.py",
+        "function": "raw_data",
+        "line": 20
+      }
+    ],
+    [
+      {
+        "repository": "mobipi",
+        "path": "mobipi/collect_demos/auto_close_door_general.py",
+        "function": "forward",
+        "line": 41
+      },
+      {
+        "repository": "mobipi",
+        "path": "mobipi/collect_demos/auto_close_microwave_door.py",
+        "function": "forward",
+        "line": 23
+      }
+    ],
+    [
+      {
+        "repository": "mobipi",
+        "path": "mobipi/collect_demos/auto_close_door_general.py",
+        "function": "normalize",
+        "line": 55
+      },
+      {
+        "repository": "mobipi",
+        "path": "mobipi/collect_demos/auto_close_microwave_door.py",
+        "function": "normalize",
+        "line": 43
+      }
+    ],
+    [
+      {
+        "repository": "mobipi",
+        "path": "mobipi/collect_demos/auto_close_door_general.py",
+        "function": "smoothstep",
+        "line": 63
+      },
+      {
+        "repository": "mobipi",
+        "path": "mobipi/collect_demos/auto_close_microwave_door.py",
+        "function": "smoothstep",
+        "line": 50
+      }
+    ],
+    [
+      {
+        "repository": "mobipi",
+        "path": "mobipi/collect_demos/auto_close_door_general.py",
+        "function": "site_pose",
+        "line": 72
+      },
+      {
+        "repository": "mobipi",
+        "path": "mobipi/collect_demos/auto_close_microwave_door.py",
+        "function": "site_pose",
+        "line": 82
+      }
+    ],
+    [
+      {
+        "repository": "mobipi",
+        "path": "mobipi/collect_demos/auto_close_door_general.py",
+        "function": "make_T",
+        "line": 86
+      },
+      {
+        "repository": "mobipi",
+        "path": "mobipi/collect_demos/auto_close_microwave_door.py",
+        "function": "make_T",
+        "line": 328
+      }
+    ],
+    [
+      {
+        "repository": "mobipi",
+        "path": "mobipi/collect_demos/auto_close_door_general.py",
+        "function": "interpolate_rotation",
+        "line": 97
+      },
+      {
+        "repository": "mobipi",
+        "path": "mobipi/collect_demos/auto_close_microwave_door.py",
+        "function": "interpolate_rotation",
+        "line": 316
+      }
+    ],
+    [
+      {
+        "repository": "mobipi",
+        "path": "mobipi/collect_demos/auto_close_door_general.py",
+        "function": "arm_joint_names",
+        "line": 115
+      },
+      {
+        "repository": "mobipi",
+        "path": "mobipi/collect_demos/auto_close_microwave_door.py",
+        "function": "arm_joint_names",
+        "line": 344
+      }
+    ],
+    [
+      {
+        "repository": "mobipi",
+        "path": "mobipi/collect_demos/auto_close_door_general.py",
+        "function": "force_tangent_direction",
+        "line": 389
+      },
+      {
+        "repository": "mobipi",
+        "path": "mobipi/collect_demos/auto_close_microwave_door.py",
+        "function": "force_tangent_direction",
+        "line": 482
+      }
+    ],
+    [
+      {
+        "repository": "mobipi",
+        "path": "mobipi/collect_demos/auto_close_door_general.py",
+        "function": "set_ik_q0_from_current_pose",
+        "line": 412
+      },
+      {
+        "repository": "mobipi",
+        "path": "mobipi/collect_demos/auto_close_microwave_door.py",
+        "function": "set_ik_q0_from_current_pose",
+        "line": 321
+      }
+    ],
+    [
+      {
+        "repository": "mobipi",
+        "path": "mobipi/collect_demos/experiment_paths.py",
+        "function": "experiment_root",
+        "line": 11
+      },
+      {
+        "repository": "robomimic",
+        "path": "robomimic/utils/rby1_paths.py",
+        "function": "experiment_root",
+        "line": 12
+      }
+    ]
+  ]
+}

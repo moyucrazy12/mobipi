@@ -1,5 +1,8 @@
 # RBY1 Microwave Door Demo Collection
 
+Canonical implementations now live in [`rby1/`](../../rby1/README.md). The
+commands below remain supported through compatibility wrappers.
+
 ## Microwave fix
 
 In `microwave.py`, replace the old direct `qpos` indexing:

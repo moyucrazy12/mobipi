@@ -1,0 +1,31 @@
+{
+  "demonstrations": {
+    "dataset_arrays": 38,
+    "all_arrays_bitwise_equal": true,
+    "maximum_float_difference": 0.0,
+    "scope": "All dataset arrays, including images; file-path metadata attributes excluded"
+  },
+  "source_preparation": {
+    "dataset_arrays": 47,
+    "all_arrays_bitwise_equal": true,
+    "maximum_float_difference": 0.0,
+    "scope": "All dataset arrays, including images; file-path metadata attributes excluded"
+  },
+  "mimicgen": {
+    "dataset_arrays": 48,
+    "all_arrays_bitwise_equal": true,
+    "maximum_float_difference": 0.0,
+    "scope": "All dataset arrays, including images; file-path metadata attributes excluded"
+  },
+  "checkpoint_inference": {
+    "equal": true,
+    "scope": "Complete shape_check result including action vector and queue length; settings output/config paths excluded"
+  },
+  "three_step_rollout": {
+    "equal": true,
+    "steps": 3,
+    "seed": 0,
+    "policy_epoch": 9,
+    "scope": "All result fields except video path and wall_seconds; control and policy action logs identical"
+  }
+}
