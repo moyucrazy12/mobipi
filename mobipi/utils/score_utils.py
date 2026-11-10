@@ -386,10 +386,13 @@ class KNNDenseDescriptorDistribution(Distribution):
 class MiniCPMV2ObjectDetectionDistribution:
     def __init__(self, model_name="openbmb/MiniCPM-V-2", device="cuda",
                  view_robot=False):
+        # Transformers only allows SDPA attention with torch >= 2.1.1; fall back to
+        # eager attention (same outputs, slower) on older torch
+        from transformers.utils import is_torch_sdpa_available
         self.model = AutoModel.from_pretrained(
             model_name,
             trust_remote_code=True,
-            attn_implementation="sdpa",
+            attn_implementation="sdpa" if is_torch_sdpa_available() else "eager",
             torch_dtype=torch.bfloat16,
         )
         self.model = self.model.to(device, dtype=torch.bfloat16)
@@ -522,6 +525,7 @@ class HybridDistribution(Distribution):
         image_size=224,
         buffer_workspace_boundary=True,
         detector_view_robot=False,
+        collision_threshold_multiplier=0.5,
     ):
         print(f"[score_utils.py] Creating hybrid score function.")
         if not skip_detection:
@@ -540,6 +544,8 @@ class HybridDistribution(Distribution):
             raise ValueError("k shouldn't be empty")
         print(f"[score_utils.py] k_id.")
         self.skip_collision = skip_collision
+        # Scoring only: navigation and init pose sampling query k_col with their own radii
+        self.collision_threshold_multiplier = collision_threshold_multiplier
         self.k_col = PCVacancyDistribution(
             ply_path,
             floor_fixture_bounds_2d,
@@ -585,7 +591,9 @@ class HybridDistribution(Distribution):
 
         # Compute scores from k_col (without rendering)
         if not self.skip_collision:
-            score_col = self.k_col.compute_score(None, None, poses)
+            score_col = self.k_col.compute_score(
+                None, None, poses, collision_threshold_multiplier=self.collision_threshold_multiplier
+            )
         else:
             score_col = torch.ones_like(final_scores)
 

@@ -32,6 +32,7 @@ from datetime import datetime
 
 import robosuite
 import robocasa  # registers RoboCasa environments
+import mobipi.envs  # registers the Mobi-pi task variants (e.g. CloseDrawerLeft)
 from robocasa.models.fixtures import FixtureType
 from robosuite.utils.camera_utils import get_camera_intrinsic_matrix
 
@@ -224,6 +225,7 @@ def main(
     env = make_env(env_args, layout_id, style_id)
     gripper_action = gripper_action_from_dataset(env, first_action)
     env.reset()
+    rby1_utils.set_task_pose(env, env_name)
     (
         base_fixture_bounds_2d,
         floor_fixture_bounds_2d,
@@ -266,6 +268,8 @@ def main(
         print(f"\n===== Episode {ep} =====")
         rng = np.random.default_rng(seed * 10000 + ep)
         env.reset()
+        # The task's fixed torso/head pose, as in the demos; the camera pose is captured with it
+        rby1_utils.set_task_pose(env, env_name)
 
         # Camera pose / robot appearance relative to the base, captured at the default pose
         rel_cam_positions, rel_cam_mats, robot_imgs, robot_masks = [], [], [], []
