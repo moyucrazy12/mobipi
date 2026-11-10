@@ -12,6 +12,7 @@ import h5py
 import numpy as np
 
 from mobipi.collect_demos import evaluate_faucet_dp as evaluation
+from rby1.paths import CONFIG_ROOT
 
 
 DATASET = CHECKPOINT = None  # Assigned temporary fixtures in setUpClass.
@@ -127,7 +128,7 @@ class FaucetGridTests(unittest.TestCase):
             args = SimpleNamespace(dataset=DATASET, output=output, check_only=False,
                                    fixture_offset=[0., 0., 0.], demo_keys=["demo_5"],
                                    seeds=[0, 1], env_seed=0, max_steps=2, device="cpu",
-                                   task_config=Path(evaluation.__file__).with_name("faucet_config.json"),
+                                   task_config=(CONFIG_ROOT / "faucet_config.json"),
                                    plan_only=False, resume=False)
             calls = []
 
@@ -257,7 +258,7 @@ class FaucetGridTests(unittest.TestCase):
             args = SimpleNamespace(dataset=DATASET, output=Path(temporary) / "uncreated",
                                    check_only=False, fixture_offset=[0., 0., 0.], demo_keys=None,
                                    seeds=evaluation.GRID_SEEDS, env_seed=0, max_steps=2500,
-                                   device="cuda", task_config=Path(evaluation.__file__).with_name("faucet_config.json"),
+                                   device="cuda", task_config=(CONFIG_ROOT / "faucet_config.json"),
                                    plan_only=True)
             with patch.object(evaluation, "load_policy", side_effect=AssertionError("Policy must not load")), \
                     patch("builtins.print"):
