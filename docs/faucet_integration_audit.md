@@ -3,6 +3,10 @@
 Audit date: 2026-11-10. This is a preliminary Phase 1 report, not the completed
 repository history audit or a claim that refactoring is complete.
 
+For the subsequent integration preparation, dependency commits and regression
+results, see [faucet_release_integration.md](faucet_release_integration.md).
+The observations below describe the original development checkout.
+
 ## Integration status
 
 - Current branch: `rby1_turn_on_sink_faucet_demos`.
