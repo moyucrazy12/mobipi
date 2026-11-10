@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+from rby1.robot.controllers import set_ik_q0_from_current_pose
 from rby1.robot.sim_utils import (
     raw_model, raw_data, forward, normalize, smoothstep,
     site_pose, make_T, interpolate_rotation, arm_joint_names, force_tangent_direction,
@@ -353,13 +354,6 @@ def door_facing_rotation(hinge_axis, door_normal, T_tcp_wrist):
 # -----------------------------------------------------------------------------
 # Robot commands, generalized to left or right arm
 # -----------------------------------------------------------------------------
-
-def set_ik_q0_from_current_pose(base_env, robot):
-    if not isinstance(robot.composite_controller, WholeBody):
-        return
-    ik = robot.composite_controller.joint_action_policy
-    ik.q0 = np.array([float(base_env.sim.data.get_joint_qpos(name)) for name in ik.joint_names])
-    print("\nIK q0:", np.round(ik.q0, 3))
 
 
 def tcp_to_wrist_target(tcp_pos, tcp_rot, T_tcp_wrist):

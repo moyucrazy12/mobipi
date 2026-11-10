@@ -9,7 +9,7 @@ from unittest.mock import patch
 import numpy as np
 
 from rby1.paths import REPOSITORY_ROOT
-from rby1.robot import navigation, sim_utils
+from rby1.robot import controllers, navigation, sim_utils
 from rby1.demos import auto_close_door_general, auto_close_microwave_door
 
 
@@ -44,6 +44,10 @@ class NumericalEquivalenceTests(unittest.TestCase):
         for name in names:
             for module in (auto_close_door_general, auto_close_microwave_door):
                 self.assertIs(getattr(module, name), getattr(sim_utils, name))
+        for module in (auto_close_door_general, auto_close_microwave_door):
+            self.assertIs(module.set_ik_q0_from_current_pose, controllers.set_ik_q0_from_current_pose)
+        for name in ("build_controller_interface", "create_robot_action", "pose_target_for_ref", "execute_target"):
+            self.assertIs(getattr(auto_close_microwave_door, name), getattr(controllers, name))
 
     def test_simulator_wrappers_and_forward_fallback(self):
         model, data = object(), object()

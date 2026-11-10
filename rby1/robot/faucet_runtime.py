@@ -14,10 +14,10 @@ from robosuite.models.grippers import GRIPPER_MAPPING
 from robocasa.environments.kitchen.single_stage.kitchen_sink import TurnOnSinkFaucet
 from mimicgen.env_interfaces.robosuite import RobosuiteInterface
 
-from rby1.demos.auto_close_microwave_door import (
-    build_controller_interface, create_robot_action, make_T, pose_target_for_ref,
-    raw_data, raw_model, site_pose,
+from rby1.robot.controllers import (
+    build_controller_interface, create_robot_action, pose_target_for_ref,
 )
+from rby1.robot.sim_utils import make_T, raw_data, raw_model, site_pose
 
 ROOT = Path(__file__).resolve().parents[2]
 ASSETS = ROOT / "assets/robosuite"
