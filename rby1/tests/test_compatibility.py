@@ -12,7 +12,7 @@ class CompatibilityTests(unittest.TestCase):
     def test_legacy_modules_share_identity_and_patch_targets(self):
         migration = json.loads((REPOSITORY_ROOT / "docs/codebase_cleanup/migration.json").read_text())
         for old, new in migration.items():
-            if not old.endswith(".py") or "/tests/" in old or old.endswith("test_mobilization.py"):
+            if not old.endswith(".py") or "/tests/" in old or old.endswith(("test_mobilization.py", "/__init__.py")):
                 continue
             with self.subTest(module=old):
                 legacy = importlib.import_module(old[:-3].replace("/", "."))

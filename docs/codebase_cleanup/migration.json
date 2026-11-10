@@ -20,5 +20,16 @@
   "mobipi/collect_demos/faucet_relative_cartesian_dp.json": "rby1/configs/faucet_relative_cartesian_dp.json",
   "mobipi/collect_demos/faucet_relative_cartesian_dp_extended.json": "rby1/configs/faucet_relative_cartesian_dp_extended.json",
   "mobipi/collect_demos/faucet_config.json": "rby1/configs/faucet_config.json",
-  "mobipi/collect_demos/faucet_mimicgen_diverse_config.json": "rby1/configs/faucet_mimicgen_diverse_config.json"
+  "mobipi/collect_demos/faucet_mimicgen_diverse_config.json": "rby1/configs/faucet_mimicgen_diverse_config.json",
+  "mobipi/utils/rby1_utils.py": "rby1/robot/navigation.py",
+  "mobipi/envs/kitchen_drawer.py": "rby1/robot/kitchen_drawer.py",
+  "mobipi/scripts/run_rby1_pipeline.py": "rby1/pipeline/run.py",
+  "mobipi/scripts/evaluate_rby1_pipeline.py": "rby1/pipeline/evaluate.py",
+  "mobipi/eval/test_mobilization.py": "rby1/pipeline/test_mobilization.py",
+  "mobipi/pipeline/tasks/close_microwave.py": "rby1/pipeline/tasks/close_microwave.py",
+  "mobipi/pipeline/tasks/close_drawer.py": "rby1/pipeline/tasks/close_drawer.py",
+  "mobipi/pipeline/tasks/base.py": "rby1/pipeline/tasks/base.py",
+  "mobipi/pipeline/tasks/__init__.py": "rby1/pipeline/tasks/__init__.py",
+  "configs/mimicgen/CloseDrawerLeft_RBY1_300mg.json": "rby1/configs/mimicgen/CloseDrawerLeft_RBY1_300mg.json",
+  "configs/mimicgen/CloseSingleDoor_RBY1_surface_layout1_115mg.json": "rby1/configs/mimicgen/CloseSingleDoor_RBY1_surface_layout1_115mg.json"
 }

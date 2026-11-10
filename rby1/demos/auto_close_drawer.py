@@ -27,8 +27,8 @@ from robosuite.controllers import load_composite_controller_config
 from robosuite.wrappers import DataCollectionWrapper
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-import mobipi.envs  # noqa: F401  registers CloseDrawerLeft
-from mobipi.utils import rby1_utils
+import rby1.robot.kitchen_drawer  # noqa: F401  registers CloseDrawerLeft
+from rby1.robot import navigation as rby1_utils
 from rby1.demos.auto_close_microwave_door import (
     DEFAULT_CONTROLLER,
     build_controller_interface,
