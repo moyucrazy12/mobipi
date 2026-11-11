@@ -6,6 +6,9 @@ Jingyun Yang, Isabella Huang*, Brandon Vu*, Max Bajracharya, Rika Antonova, Jean
 
 ![The Policy Mobilization Problem](assets/github_teaser.gif)
 
+RB-Y1 simulation workflows and external configuration requirements are documented
+in [rby1/README.md](rby1/README.md).
+
 ## 1 Introduction
 
 We introduce the "policy mobilization" problem: find a mobile robot base pose in a novel environment that is in distribution with respect to a manipulation policy trained on a limited set of camera viewpoints.
