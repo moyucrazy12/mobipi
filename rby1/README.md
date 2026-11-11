@@ -1,5 +1,7 @@
 # RB-Y1 simulation workflows
 
+For existing feature branches and coding agents, see [MIGRATION.md](MIGRATION.md).
+
 `demos/` contains door, drawer and faucet planners and dataset tools; `robot/`
 contains shared controllers and simulation/task adapters; `policies/` contains
 faucet preparation/evaluation; `pipeline/` connects these to MobiPi. RoboCasa
