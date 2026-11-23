@@ -7,7 +7,15 @@ import os
 import json
 from pathlib import Path
 import torch
+import torch._inductor.config
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# nerfstudio torch.compiles get_viewmat on the first render. Inductor's default
+# compiles in worker processes forked from this one, and those forks die once
+# CUDA, the MuJoCo renderer or the RB-Y1 SDK's gRPC threads are running
+# (BrokenProcessPool). The graph is tiny, so compile it in-process.
+if "TORCHINDUCTOR_COMPILE_THREADS" not in os.environ:
+    torch._inductor.config.compile_threads = 1
 
 from nerfstudio.cameras.cameras import Cameras, CameraType
 from nerfstudio.utils.eval_utils import eval_setup  # Assume this is imported correctly
