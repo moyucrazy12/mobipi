@@ -14,6 +14,7 @@ setup(
         include=("mobipi", "mobipi.*", "rby1_mobipi", "rby1_mobipi.*"),
         exclude=("*.__pycache__",),
     ),
+    package_data={"rby1_mobipi": ["policies/configs/cube_*.json", "policies/configs/requirements-cube.txt"]},
     install_requires=[
     ],
     classifiers=[

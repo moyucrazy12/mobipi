@@ -188,3 +188,5 @@ RBY1_TEST_CONFIG="$CONFIG_DIR/faucet_config.json" python -m unittest discover -s
 
 Without `RBY1_TEST_CONFIG`, the two simulator checks are skipped; dataset and
 termination guards still run.
+
+CubeInCup comparison policies: [experiment guide](CUBE_IN_CUP_EXPERIMENTS.md).
