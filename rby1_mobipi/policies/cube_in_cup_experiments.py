@@ -276,12 +276,16 @@ def evaluate_offline(experiment, dataset, checkpoint, output, stride=8, max_wind
                                     first_transition_error_s=float(slots[pt[0]]-slots[tt[0]]) if len(pt) and len(tt) else None))
             trajectories.append(dict(validation_index=index,demo=demo,anchor_index=t,time_offsets_s=slots.tolist(),predicted_xyz=ppose[:,:3,3].tolist(),
                                      demonstrated_xyz=tpose[:,:3,3].tolist(),translation_error_m=pe.tolist(),orientation_error_deg=re.tolist()))
+    def by_slot(values):
+        columns = np.asarray(values).T
+        return [float(np.mean(col[np.isfinite(col)])) if np.isfinite(col).any() else None
+                for col in columns]
     report=dict(experiment=experiment,checkpoint=str(checkpoint),dataset_sha256=sha256(dataset),windows=len(indices),
                 mode='teacher-forced observation anchors; open-loop 8-action chunks; NOT closed-loop/task success',
                 translation_mean_m=float(np.nanmean(positions)),orientation_mean_deg=float(np.nanmean(angles)),
-                gripper_accuracy=float(np.nanmean(accuracy)),translation_by_slot_m=np.nanmean(positions,axis=0).tolist(),
-                orientation_by_slot_deg=np.nanmean(angles,axis=0).tolist(),transitions=transitions,trajectories=trajectories)
-    with open(output,'x') as stream: json.dump(report,stream,indent=2)
+                gripper_accuracy=float(np.nanmean(accuracy)),translation_by_slot_m=by_slot(positions),
+                orientation_by_slot_deg=by_slot(angles),transitions=transitions,trajectories=trajectories)
+    with open(output,'x') as stream: json.dump(report,stream,indent=2,allow_nan=False)
     return {k:v for k,v in report.items() if k not in ('transitions','trajectories')}
 
 
