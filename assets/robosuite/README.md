@@ -105,4 +105,4 @@ Check model registration after installation:
 python -c "from robosuite.models.robots.robot_model import REGISTERED_ROBOTS; assert 'RBY1' in REGISTERED_ROBOTS"
 ```
 
-See [the RB-Y1 guide](../../rby1/README.md) for demonstration and policy commands.
+See [the RB-Y1 guide](../../rby1_mobipi/README.md) for demonstration and policy commands.

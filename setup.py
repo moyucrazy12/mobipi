@@ -11,7 +11,7 @@ setup(
     author_email="jingyuny@stanford.edu",
     url="https://github.com/yjy0625/mobipi",
     packages=find_namespace_packages(
-        include=("mobipi", "mobipi.*", "rby1", "rby1.*"),
+        include=("mobipi", "mobipi.*", "rby1_mobipi", "rby1_mobipi.*"),
         exclude=("*.__pycache__",),
     ),
     install_requires=[

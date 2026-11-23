@@ -7,7 +7,7 @@ Jingyun Yang, Isabella Huang*, Brandon Vu*, Max Bajracharya, Rika Antonova, Jean
 ![The Policy Mobilization Problem](assets/github_teaser.gif)
 
 RB-Y1 simulation workflows and external configuration requirements are documented
-in [rby1/README.md](rby1/README.md).
+in [rby1_mobipi/README.md](rby1_mobipi/README.md).
 
 ## 1 Introduction
 

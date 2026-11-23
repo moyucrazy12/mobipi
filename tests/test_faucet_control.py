@@ -13,8 +13,8 @@ class FaucetControlTests(unittest.TestCase):
     def setUpClass(cls):
         import robosuite
         from robosuite.controllers import load_composite_controller_config
-        from rby1.robot.faucet_runtime import CONTROLLER, MG_RBY1TurnOnSinkFaucet
-        from rby1.robot.faucet_bounded_ik import bind_bounded_ik
+        from rby1_mobipi.robot.faucet_runtime import CONTROLLER, MG_RBY1TurnOnSinkFaucet
+        from rby1_mobipi.robot.faucet_bounded_ik import bind_bounded_ik
         kwargs = dict(json.loads(Path(os.environ["RBY1_TEST_CONFIG"]).expanduser().read_text())["environment"])
         for key in ("camera_names", "camera_heights", "camera_widths"):
             kwargs.pop(key, None)
@@ -27,7 +27,7 @@ class FaucetControlTests(unittest.TestCase):
         cls.solver = bind_bounded_ik(cls.interface)
 
     def test_ik_respects_joint_limits_without_mutating_live_state(self):
-        from rby1.robot.faucet_runtime import raw_data, UnsafeTrajectory
+        from rby1_mobipi.robot.faucet_runtime import raw_data, UnsafeTrajectory
         before = raw_data(self.env.sim).qpos.copy()
         target = self.interface.get_robot_eef_pose()
         target[2, 3] += .01

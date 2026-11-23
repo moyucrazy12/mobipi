@@ -7,9 +7,9 @@ import unittest
 import h5py
 import numpy as np
 
-from rby1.demos.faucet_dataset import validate, write_episode
-from rby1.demos.faucet_progress import ProgressGate
-from rby1.pipeline.collect import run_lock
+from rby1_mobipi.demos.faucet_dataset import validate, write_episode
+from rby1_mobipi.demos.faucet_progress import ProgressGate
+from rby1_mobipi.pipeline.collect import run_lock
 
 
 class RecordingTests(unittest.TestCase):
