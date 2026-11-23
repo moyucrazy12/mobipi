@@ -19,3 +19,9 @@ mobipi/macros_private.py
 datasets/
 mobipi/collect_demos/rby1*
 generated_datasets/
+
+# Generated policy artifacts
+*.hdf5
+*.h5
+*.pth
+*.pt

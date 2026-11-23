@@ -108,6 +108,39 @@ python -m robomimic.scripts.dataset_states_to_obs --dataset "$DRAWER_GENERATED" 
 python -m robomimic.scripts.prepare_rby1_dp_dataset --dataset "$DRAWER_RENDERED" --output data/drawer_policy.hdf5 --valid-ratio 0.1
 ```
 
+### CubeInCup NPZ recordings
+
+Use `prepare_cube_in_cup` for the recorded 7-D **right-arm** policy. It accepts
+a directory containing `session_*/sequence_*`, an existing `recordings/` directory,
+or its parent. Sessions are ordered numerically and moved into `recordings/demo_1`,
+`demo_2`, etc.; their internal filenames and camera references remain intact.
+`--exclude session_004/sequence_009` and `--skip-incomplete` quarantine unwanted
+sequences under `excluded/`. A CSV preserves the original session/sequence names.
+Existing recordings are reused without moving them again.
+
+```bash
+python -m rby1_mobipi.policies.prepare_cube_in_cup --source "$RECORDINGS_DIR" --output "$DATASET" --source-color-order bgr --manifest "$RECORDING_MANIFEST"
+python -m robomimic.scripts.train --config "$CUBE_DP_CONFIG" --dataset "$DATASET"
+```
+
+The manifest argument is optional when the organizer created the CSV. Supply a
+new HDF5 output; an interrupted conversion remains as `.partial` for inspection.
+The current recorder's ZMQ receiver stores BGR color frames, so select `bgr` to
+store RGB; select `rgb` for recordings already in RGB. Images retain their source
+resolution. Only head/right-wrist color and right-arm proprioception are written;
+depth, left-wrist images, left-arm and head action channels are omitted.
+
+Actions are copied exactly from `action[t][7:14]`: position deltas in metres,
+extrinsic XYZ Euler deltas in radians, and future absolute gripper width in metres.
+Quaternions remain wxyz; timestamps and row order are preserved without resampling.
+Use native Diffusion Policy with `action_keys=["actions"]`, min/max normalization,
+and `algo.relative_actions.enabled=false`; these are not the faucet pose9 labels.
+The generated whole-episode train/valid split is not an unseen-session benchmark.
+Rewards are zero placeholders and terminal flags mark recording boundaries.
+Disable simulated rollouts and set dataset `do_eval=false` for this offline data.
+Deployment needs a consumer explicitly selecting the right arm: the separate
+WBC worker currently interprets a 7-D prediction as a left-arm command.
+
 ## 4. Diffusion Policy training
 
 Use matching external configs. Native RoboMimic retains the absolute/relative
@@ -155,3 +188,5 @@ RBY1_TEST_CONFIG="$CONFIG_DIR/faucet_config.json" python -m unittest discover -s
 
 Without `RBY1_TEST_CONFIG`, the two simulator checks are skipped; dataset and
 termination guards still run.
+
+CubeInCup comparison policies: [experiment guide](CUBE_IN_CUP_EXPERIMENTS.md).
