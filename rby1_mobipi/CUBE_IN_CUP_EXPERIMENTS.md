@@ -3,6 +3,66 @@
 Use `rby1_mobipi`, the current Python package name. No `rby1` compatibility package
 is provided. This guide covers offline training; it does not control WBC or a robot.
 
+## New constrained-layout run: 50 epochs
+
+Profile: `relative_10d_constrained_e50`. Uses 31 new session-006 demonstrations,
+27 training / 4 validation, 12,428 samples (11,002 / 1,426 windows). Original failed
+sequences 011, 014 and 016 are excluded. The source recordings remain unchanged.
+Obtain the standalone relative HDF5 privately; save it as
+`$DATASET_DIR/relative_10d_constrained.hdf5`. The local preparation name was
+`cube_in_cup_bounding_box_relative_10d.hdf5`; renaming does not change its contents.
+Required size: **3,250,558,458 bytes**. SHA-256:
+
+```text
+25f6c240a74bda889fa2781264d8246c884b2a2932cbeaa4fa7d6dafafedf25f
+```
+
+Fresh checkout (for an existing checkout, fetch, switch to the same branch and
+`git pull --ff-only` before updating submodules; preserve local changes first):
+
+```bash
+git clone --branch feat/cube-in-cup-constrained-e50 --single-branch \
+  https://github.com/moyucrazy12/mobipi.git mobipi
+cd mobipi
+git config submodule.external/robomimic.url https://github.com/moyucrazy12/mobipi-robomimic.git
+git submodule update --init external/robomimic
+# Use an existing working mobipi environment, or create this separate environment:
+conda create -n cube-dp python=3.10
+conda activate cube-dp
+python -m pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cu128
+python -m pip install -r rby1_mobipi/policies/configs/requirements-cube.txt
+python -m pip install --no-deps -e external/robomimic -e .
+export PYTHONPATH="$PWD:$PWD/external/robomimic${PYTHONPATH:+:$PYTHONPATH}"
+export DATASET_DIR=/private/path/to/datasets
+export RESULTS_DIR=/private/path/to/results
+printf '%s  %s\n' 25f6c240a74bda889fa2781264d8246c884b2a2932cbeaa4fa7d6dafafedf25f \
+  "$DATASET_DIR/relative_10d_constrained.hdf5" | sha256sum -c -
+python -m rby1_mobipi.policies.cube_in_cup_experiments train \
+  --experiment relative_10d_constrained_e50 \
+  --dataset "$DATASET_DIR/relative_10d_constrained.hdf5" \
+  --output "$RESULTS_DIR/relative_10d_constrained_e50" --device cuda
+```
+
+The tested PyTorch build is CUDA 12.8; select a machine-compatible build if needed.
+The CLI checks the constrained dataset checksum before creating the output root.
+Output root must be new. This is a **fresh** run: no 13-epoch checkpoint is loaded.
+Adam, constant LR 1e-4, batch 8, seed 2026, horizons 2/16/8, DDIM 100/10 and EMA;
+observations, architecture, binary gripper and relative normalization are unchanged.
+Both epoch caps are null, with `drop_last=false`: 1,376 training batches per epoch
+(including the final 2 windows), **68,800 optimizer updates** over 50 epochs;
+179 validation batches every epoch. No replacement sampler is used.
+
+```bash
+python -m tensorboard.main --logdir "$RESULTS_DIR/relative_10d_constrained_e50" --port 6006
+```
+
+Outputs: `OUTPUT/relative_10d_constrained_e50/TIMESTAMP/`, containing `config.json`,
+`logs/log.txt`, TensorBoard events and `models/model_epoch_*.pth`. Save every 5 epochs
+plus each new best validation result (`*_best_validation_*.pth`). Dependency pin:
+`102c3ae57037879b3b2541097dbda3c0d2c813f7`; do not update to a floating branch.
+For offline evaluation, select `--experiment relative_10d_constrained_e50` with the
+same dataset/checkpoint; it remains teacher-forced evaluation, not task success.
+
 | Experiment | Action | Dataset |
 |---|---|---|
 | A `baseline_7d` | Achieved world XYZ + spatial XYZ Euler delta + width (m) | Original HDF5; already training |

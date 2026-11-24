@@ -15,6 +15,10 @@ from .cube_actions import (EXPERIMENTS, WIDTH_THRESHOLD, binary_gripper,
                           measured_poses, rotation6d_from_euler, decode_chunk, GripperHysteresis)
 from robomimic.utils.rby1_relative_cartesian import transform_to_pose9, encode_relative_target
 
+# Experiment profiles may share one unchanged dataset/action representation.
+EXPERIMENT_PROFILES = {name: name for name in EXPERIMENTS}
+EXPERIMENT_PROFILES['relative_10d_constrained_e50'] = 'relative_10d'
+
 VERSION = 1
 CONFIG_DIR = Path(__file__).with_name('configs')
 OBS_KEYS = ('right_joint_pos', 'right_joint_vel', 'right_ee_pos', 'right_ee_quat',
@@ -33,7 +37,15 @@ def split_names(f, split):
     return [s.decode() for s in f['mask'][split][:]]
 
 
+def action_representation(experiment):
+    try:
+        return EXPERIMENT_PROFILES[experiment]
+    except KeyError as exc:
+        raise ValueError(f"Unknown experiment: {experiment}") from exc
+
+
 def contract(experiment):
+    experiment = action_representation(experiment)
     return dict(version=VERSION, experiment=experiment, frame='WBC world / end_effector_r',
                 quaternion_order='wxyz', resampled=False, source='achieved measured motion',
                 target_alignment='action row i targets measured pose min(i+1,N-1)',
@@ -43,6 +55,7 @@ def contract(experiment):
 
 
 def prepare(experiment, source, output):
+    experiment = action_representation(experiment)
     if experiment == 'baseline_7d':
         raise ValueError('Baseline is immutable: use its original HDF5; no conversion')
     source, output = Path(source).resolve(), Path(output).resolve()
@@ -89,6 +102,7 @@ def prepare(experiment, source, output):
 
 
 def validate(experiment, dataset, source=None):
+    experiment = action_representation(experiment)
     counts = {}; worst_pos = 0.; worst_angle = 0.
     with h5py.File(dataset, 'r') as f:
         if experiment != 'baseline_7d':
@@ -179,11 +193,15 @@ def train(experiment, dataset, output, device):
     if experiment == 'baseline_7d':
         raise ValueError('Launch the existing baseline with its original command; this CLI never changes it')
     validate(experiment, dataset)
+    config = configuration(experiment, dataset, output)
+    dataset_hash = sha256(dataset)
+    required_hash = config.experiment.env_meta_update_dict.get('cube_required_dataset_sha256')
+    if required_hash is not None and dataset_hash != required_hash:
+        raise ValueError('This profile requires the published constrained-layout dataset checksum')
     output = Path(output).resolve()
     # Native get_exp_dir can prompt to delete prior runs: refuse preexisting root.
     output.mkdir(parents=True, exist_ok=False)
-    config = configuration(experiment, dataset, output)
-    config.experiment.env_meta_update_dict.cube_dataset_sha256 = sha256(dataset)
+    config.experiment.env_meta_update_dict.cube_dataset_sha256 = dataset_hash
     from robomimic.scripts.train import train as native_train
     import torch
     native_train(config, torch.device(device))
@@ -257,7 +275,7 @@ def evaluate_offline(experiment, dataset, checkpoint, output, stride=8, max_wind
             truth = ep['actions'][t:t + len(future)]
             raw_obs=batch['obs']
             anchor=measured_poses({key:raw_obs[key][0,1].numpy() for key in ('right_ee_pos','right_ee_quat')})
-            ppose=decode_chunk(experiment,pred,anchor); tpose=measured_poses(ep['obs'])[future]
+            ppose=decode_chunk(action_representation(experiment),pred,anchor); tpose=measured_poses(ep['obs'])[future]
             pe=np.linalg.norm(ppose[:,:3,3]-tpose[:,:3,3],axis=-1)
             re=np.rad2deg(Rotation.from_matrix(ppose[:,:3,:3] @ tpose[:,:3,:3].swapaxes(-1,-2)).magnitude())
             initial=bool(raw_obs['right_gripper_width'][0,1,0] < WIDTH_THRESHOLD)
@@ -293,7 +311,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     sub=parser.add_subparsers(dest='command',required=True)
     for command in ('prepare','validate','train','evaluate-offline'):
-        p=sub.add_parser(command);p.add_argument('--experiment',choices=EXPERIMENTS,required=True)
+        p=sub.add_parser(command);p.add_argument('--experiment',choices=EXPERIMENT_PROFILES,required=True)
         p.add_argument('--source' if command=='prepare' else '--dataset',type=Path,required=True)
         if command in ('prepare','train','evaluate-offline'):p.add_argument('--output',type=Path,required=True)
         if command=='train':p.add_argument('--device',choices=('cpu','cuda'),default='cuda')

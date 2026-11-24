@@ -15,7 +15,7 @@ from rby1_mobipi.policies.cube_actions import (
     binary_gripper, GripperHysteresis, decode_chunk, rotation6d_from_euler,
 )
 from rby1_mobipi.policies.cube_in_cup_experiments import (
-    OBS_KEYS, prepare, validate, configuration, load_training_data, sha256, evaluate_offline, main,
+    OBS_KEYS, prepare, validate, configuration, load_training_data, sha256, evaluate_offline, main, train as launch_train,
 )
 from robomimic.utils.rby1_relative_cartesian import tcp_pose, encode_relative_target
 
@@ -40,6 +40,45 @@ class ExperimentTests(unittest.TestCase):
                 a=np.c_[p[future]-p,(r[future]*r.inv()).as_euler('xyz'),width[future]].astype(np.float32)
                 ep['actions']=a;ep['timestamps']=np.array([0,.08,.2,.31,.48]);ep['dones']=np.array([0,0,0,0,1])
             f['mask/train']=np.array(['demo_0','demo_1'],dtype='S');f['mask/valid']=np.array(['demo_2'],dtype='S')
+
+    def test_constrained_fifty_epoch_profile_reuses_relative_representation(self):
+        path=self.root/'relative.hdf5'
+        prepare('relative_10d',self.source,path)
+        cfg=configuration('relative_10d_constrained_e50',path,self.root/'fresh')
+        old=configuration('relative_10d',path,self.root/'old')
+        self.assertEqual(cfg.observation,old.observation)
+        self.assertEqual(cfg.train.action_config,old.train.action_config)
+        self.assertEqual(cfg.algo.relative_actions,old.algo.relative_actions)
+        self.assertEqual(cfg.algo.unet,old.algo.unet)
+        self.assertEqual(cfg.algo.horizon,old.algo.horizon)
+        self.assertEqual(cfg.train.num_epochs,50)
+        self.assertEqual(cfg.train.batch_size,8)
+        self.assertEqual(cfg.algo.optim_params.policy.optimizer_type,'adam')
+        self.assertEqual(cfg.algo.optim_params.policy.learning_rate.initial,1e-4)
+        self.assertEqual(cfg.algo.optim_params.policy.learning_rate.scheduler_type,'constant')
+        self.assertFalse(cfg.train.drop_last)
+        self.assertIsNone(cfg.experiment.epoch_every_n_steps)
+        self.assertIsNone(cfg.experiment.validation_epoch_every_n_steps)
+        self.assertIsNone(cfg.experiment.ckpt_path)
+        self.assertTrue(cfg.experiment.validate)
+        self.assertTrue(cfg.experiment.logging.log_tb)
+        self.assertEqual(cfg.experiment.save.every_n_epochs,5)
+        self.assertTrue(cfg.experiment.save.on_best_validation)
+        validate('relative_10d_constrained_e50',path)
+        dataset,_=load_training_data(cfg)
+        self.assertEqual(dataset[0]['actions'].shape,(16,10))
+        with patch('sys.argv',['cube','train','--experiment','relative_10d_constrained_e50',
+                              '--dataset',str(path),'--output',str(self.root/'fresh')]), \
+             patch('rby1_mobipi.policies.cube_in_cup_experiments.train',return_value=None) as call:
+            main()
+            self.assertEqual(call.call_args.kwargs['experiment'],'relative_10d_constrained_e50')
+
+    def test_constrained_profile_rejects_wrong_dataset_before_output_creation(self):
+        path=self.root/'relative.hdf5'
+        prepare('relative_10d',self.source,path)
+        with self.assertRaisesRegex(ValueError,'constrained-layout dataset checksum'):
+            launch_train('relative_10d_constrained_e50',path,self.root/'must-not-exist','cpu')
+        self.assertFalse((self.root/'must-not-exist').exists())
 
     def test_all_conversions_and_native_windows(self):
         before=self.source.read_bytes()
@@ -79,7 +118,7 @@ class ExperimentTests(unittest.TestCase):
             def postprocess_batch_for_training(self, batch, obs_normalization_stats): return batch
             def _get_action_trajectory(self, obs): return self.batch['actions'][:,1:9]
         from robomimic.utils import tensor_utils
-        for name in ('binary_7d','rot6d_10d','relative_10d'):
+        for name in ('binary_7d','rot6d_10d','relative_10d','relative_10d_constrained_e50'):
             path=self.root/(name+'.hdf5');prepare(name,self.source,path)
             cfg=configuration(name,path,self.root/name)
             cfg.experiment.env_meta_update_dict.cube_dataset_sha256=sha256(path)
