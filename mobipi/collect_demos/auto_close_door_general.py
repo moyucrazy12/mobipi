@@ -506,7 +506,7 @@ def make_config(args, controller_config, renderer, forced_placement=None):
         "use_camera_obs": False,
         "control_freq": args.control_freq,
         "renderer": "mjviewer",
-        "translucent_robot": True,
+        "translucent_robot": args.translucent_robot,
         "initialization_noise": None,
         "randomize_base_init_pose": None,
         "randomize_cameras": False,
@@ -564,8 +564,13 @@ def compute_spawn_pose(base_env, fxtr, push_point, tangent, args):
             world = fixture @ local
             pos[:2] = world[:2, 3]
             ori[2] = np.arctan2(world[1, 0], world[0, 0])
+        # Translate in the stationary fixture frame, independently of door angle.
+        pos = np.asarray(pos, dtype=float).copy()
+        ori = np.asarray(ori, dtype=float).copy()
+        pos[:2] += (fixture[:3, :3] @ np.r_[args.base_offset[:2], 0.0])[:2]
+        ori[2] += np.deg2rad(args.base_offset[2])
         # Base Z comes from the floor / robot mount, independent of fixture height.
-        return np.asarray(pos), np.asarray(ori)
+        return pos, ori
 
     # Geometry fallback only if RoboCasa placement is unavailable
     tangent_xy = np.asarray(tangent[:2], dtype=float)
@@ -780,6 +785,10 @@ def parser():
     parser.add_argument("--initial-door-angle-deg", type=float, default=60)
     parser.add_argument("--base-local", nargs=3, type=float, metavar=("X", "Y", "YAW_DEG"),
                         help="Base XY/yaw in the stationary microwave frame; floor height is retained")
+    parser.add_argument("--base-offset", nargs=3, type=float, default=[0.0, 0.0, 0.0], metavar=("DX", "DY", "DYAW_DEG"),
+                        help="Fixture-frame XY/yaw offset added to the nominal placement [m, m, deg]")
+    parser.add_argument("--translucent-robot", action="store_true",
+                        help="Match the robot appearance of the original 300 training demos")
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--output-dir", default=None, help="Result JSON and trace directory")
     parser.add_argument("--tcp-speed", type=float, default=0.10)
@@ -790,6 +799,8 @@ def parser():
     parser.add_argument("--direct-approach", action="store_true",
                         help="Reach the pre-contact point along a straight TCP path while aligning")
     parser.add_argument("--orientation-speed-deg", type=float, default=15)
+    parser.add_argument("--approach-angle-limit-deg", type=float, default=90,
+                        help="Cap the hinge angle used for approach orientation; contact position follows the actual door")
     parser.add_argument("--orientation-follow", type=float, default=0.6)
     parser.add_argument("--max-orientation-deg", type=float, default=45)
     parser.add_argument("--max-slide", type=float, default=0.08)
@@ -806,6 +817,12 @@ def main():
         options.error("Use an initial door angle between 0 and 90 degrees (exclusive of zero)")
     if args.pre_lift_deg is not None and not 0 <= args.pre_lift_deg <= 90:
         options.error("Use --pre-lift-deg between 0 and 90 degrees")
+    if not np.isfinite(args.base_offset).all():
+        options.error("Use finite base offsets")
+    if not 0 < args.approach_angle_limit_deg <= 90:
+        options.error("Use --approach-angle-limit-deg in (0, 90]")
+    if any(args.base_offset) and args.spawn_mode not in ("fixture", "robocasa", "hybrid"):
+        options.error("--base-offset requires fixture-relative placement")
     if args.push_x_direction:
         options.error("World-X forcing is incompatible with the door-relative source controller")
     if args.keep_open:

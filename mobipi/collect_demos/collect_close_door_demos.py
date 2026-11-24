@@ -7,6 +7,7 @@ import fcntl
 import hashlib
 import itertools
 import json
+import math
 import os
 from pathlib import Path
 import random
@@ -20,7 +21,7 @@ import sys
 
 LAYOUT_Y_OFFSETS = {1: -0.35, 2: -0.28, 3: -0.35, 4: -0.28, 5: -0.28,
                     6: -0.35, 7: -0.28, 8: -0.35, 9: -0.35}
-FIELDS = ("demo", "attempt", "layout", "style", "angle_deg", "seed", "spawn_offset_y",
+FIELDS = ("demo", "attempt", "layout", "style", "angle_deg", "seed", "spawn_offset_y", "base_offset",
           "success", "failure_reason", "phase", "detail", "exit_code", "actual_initial_angle_deg",
           "final_angle_deg", "base_pose", "directory", "raw_demo", "log", "command")
 
@@ -29,6 +30,16 @@ def atomic_json(path, value):
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(value, indent=2) + "\n")
     temporary.replace(path)
+
+
+def sample_base_offset(seed, xy, yaw_deg):
+    """Bounded fixture-frame offsets; independent of door angle and scheduling RNG."""
+    rng = random.Random(f"rby1-base-offset:{seed}")
+    return [rng.uniform(-limit, limit) if limit else 0.0 for limit in (*xy, yaw_deg)]
+
+
+def base_key(row):
+    return row["layout"], row["style"], row["seed"], *row["base_offset"]
 
 
 def write_progress(output, state, args, quotas):
@@ -51,6 +62,9 @@ def write_progress(output, state, args, quotas):
     atomic_json(output / "stats.json", dict(saved=len(saved), target=args.count,
                 attempts=len(state["attempts"]), max_attempts=args.max_attempts,
                 saved_counts=counts, layout_targets=quotas,
+                saved_base_offset_ranges={name: [min(row["base_offset"][index] for row in saved),
+                                                max(row["base_offset"][index] for row in saved)]
+                                          for index, name in enumerate(("x_m", "y_m", "yaw_deg"))} if saved else {},
                 remaining_per_layout={str(layout): quotas[layout]-counts["layout"][str(layout)] for layout in args.layouts},
                 exhausted_cases=[dict(layout=case[0], style=case[1], angle_deg=case[2], failures=number)
                                  for case, number in sorted(failures.items()) if number >= args.max_failures_per_case],
@@ -111,7 +125,7 @@ def finish_attempt(output, pending, returncode, override, bases):
     if not reason and (returncode not in (0, None) or not result.get("success")):
         reason = "runtime_error"
     base = result.get("base_position", []) + result.get("base_orientation", [])
-    key = pending["layout"], pending["style"], pending["seed"]
+    key = base_key(pending)
     if len(base) == 6:
         if key in bases and any(abs(a-b) > 1e-6 for a, b in zip(base, bases[key])):
             reason = "base_pose_changed"
@@ -124,7 +138,7 @@ def finish_attempt(output, pending, returncode, override, bases):
     success = bool(result.get("success") and not reason)
     row = dict(demo=pending["demo"] if success else "", attempt=pending["attempt"],
                layout=pending["layout"], style=pending["style"], angle_deg=pending["angle_deg"],
-               seed=pending["seed"], spawn_offset_y=pending["spawn_offset_y"], success=success,
+               seed=pending["seed"], spawn_offset_y=pending["spawn_offset_y"], base_offset=pending["base_offset"], success=success,
                failure_reason=reason or "", phase=result.get("phase", "setup"), detail=result.get("detail", ""),
                exit_code=returncode, actual_initial_angle_deg=result.get("actual_initial_angle_deg"),
                final_angle_deg=result.get("final_angle_deg"), base_pose=base,
@@ -158,6 +172,10 @@ def main(argv=None):
     parser.add_argument("--sampler-seed", type=int, help="Reproduce batch scheduling while still varying scene seeds")
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--base-local", nargs=3, type=float, metavar=("X", "Y", "YAW_DEG"))
+    parser.add_argument("--base-jitter-xy", nargs=2, type=float, default=[0.0, 0.0], metavar=("X_M", "Y_M"),
+                        help="Uniform fixture-frame XY offsets in +/- these bounds [m]")
+    parser.add_argument("--base-jitter-yaw-deg", type=float, default=0.0,
+                        help="Uniform heading offset in +/- this bound [deg]")
     parser.add_argument("--spawn-offset-x", type=float, default=0.0)
     parser.add_argument("--spawn-offset-y", type=float, default=None, help="Override the automatic per-layout setback")
     parser.add_argument("--timeout-minutes", type=float, default=10)
@@ -169,8 +187,11 @@ def main(argv=None):
     args, extra = parser.parse_known_args(argv)
     args.layouts = list(dict.fromkeys([args.layout] if args.layout is not None else args.layouts))
     args.styles, args.angles = list(dict.fromkeys(args.styles)), list(dict.fromkeys(args.angles))
-    if args.timeout_minutes <= 0 or any(not 0 < angle <= 90 for angle in args.angles):
+    if (not math.isfinite(args.timeout_minutes) or args.timeout_minutes <= 0
+            or any(not math.isfinite(angle) or not 0 < angle <= 90 for angle in args.angles)):
         parser.error("Use positive timeout and angles between 0 and 90 degrees")
+    if any(not math.isfinite(value) or value < 0 for value in (*args.base_jitter_xy, args.base_jitter_yaw_deg)):
+        parser.error("Base jitter bounds must be finite and nonnegative")
     if any(layout not in range(10) for layout in args.layouts):
         parser.error("Layout IDs must be between 0 and 9")
     if any(style not in range(12) for style in args.styles):
@@ -186,7 +207,7 @@ def main(argv=None):
     if args.spawn_offset_y is None and any(layout not in LAYOUT_Y_OFFSETS for layout in args.layouts):
         parser.error("No placement rule for that layout; provide --spawn-offset-y explicitly")
     forbidden = {"--style", "--initial-door-angle-deg", "--record-dir", "--output-dir", "--robot-x", "--robot-y",
-                 "--robot-yaw", "--spawn-mode", "--probe-only"}
+                 "--robot-yaw", "--spawn-mode", "--probe-only", "--base-offset"}
     if any(arg.split("=")[0] in forbidden for arg in extra):
         parser.error("Scene identity, base placement and outputs are managed by this collector")
     cases = list(itertools.product(args.layouts, args.styles, args.angles))
@@ -208,9 +229,10 @@ def main(argv=None):
             args.sampler_seed = previous["sampler_seed"]
     if args.sampler_seed is None:
         args.sampler_seed = secrets.randbits(32)
-    config = dict(version=2, layouts=args.layouts, styles=args.styles, angles=args.angles, count=args.count,
+    config = dict(version=3, layouts=args.layouts, styles=args.styles, angles=args.angles, count=args.count,
                   fixed_scene_seed=args.seed, sampler_seed=args.sampler_seed, offsets={str(k): v for k, v in offsets.items()},
                   spawn_offset_x=args.spawn_offset_x, base_local=args.base_local, headless=args.headless,
+                  base_jitter_xy=args.base_jitter_xy, base_jitter_yaw_deg=args.base_jitter_yaw_deg,
                   timeout_minutes=args.timeout_minutes, max_failures_per_case=args.max_failures_per_case,
                   motion_args=extra, python=sys.executable, source_sha256=source_hashes())
     if args.resume and config != previous:
@@ -233,7 +255,7 @@ def main(argv=None):
         if "rng_state" in state:
             version, internal, gaussian = state["rng_state"]
             rng.setstate((version, tuple(internal), gaussian))
-        bases = {(row["layout"], row["style"], row["seed"]): row["base_pose"]
+        bases = {base_key(row): row["base_pose"]
                  for row in state["attempts"] if len(row.get("base_pose", [])) == 6}
         if state["pending"] is not None:
             pending = state["pending"]
@@ -260,6 +282,7 @@ def main(argv=None):
                     while seed in used_seeds:
                         seed = rng.randrange(2**31)
                 used_seeds.add(seed)
+                base_offset = sample_base_offset(seed, args.base_jitter_xy, args.base_jitter_yaw_deg)
                 attempt = len(state["attempts"]) + 1
                 tag = f"demo_{saved+1:04d}_layout{layout}_style{style}_angle{angle:g}_seed{seed}"
                 case, log_path = output / "demos" / tag, output / "logs" / f"attempt_{attempt:05d}.log"
@@ -272,14 +295,16 @@ def main(argv=None):
                     command.append("--headless")
                 if args.base_local is not None:
                     command += ["--base-local", *map(str, args.base_local)]
+                if any(base_offset):
+                    command += ["--base-offset", *map(str, base_offset)]
                 state["pending"] = dict(demo=saved+1, attempt=attempt, layout=layout, style=style, angle_deg=angle,
                                         seed=seed, spawn_offset_y=offsets[layout], directory=str(case),
-                                        log=str(log_path), command=command)
+                                        base_offset=base_offset, log=str(log_path), command=command)
                 state["rng_state"] = rng.getstate()
                 write_progress(output, state, args, quotas)
                 case.mkdir()
                 print(f"Attempt {attempt}: layout={layout} style={style} angle={angle:g} seed={seed} "
-                      f"offset_y={offsets[layout]} saved={saved}/{target}", flush=True)
+                      f"offset_y={offsets[layout]} base_offset={tuple(round(v, 4) for v in base_offset)} saved={saved}/{target}", flush=True)
                 returncode, reason = run_attempt(command, log_path, args.timeout_minutes*60, lock.fileno())
                 row = finish_attempt(output, state["pending"], returncode, reason, bases)
                 state["attempts"].append(row)

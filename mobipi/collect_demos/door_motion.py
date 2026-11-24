@@ -239,7 +239,11 @@ class DoorMotion:
 
     def run(self, facing_rotation):
         point, radial, tangent, radius = self.geometry()
-        approach_rotation = facing_rotation(tangent)
+        # Large openings can demand an unreachable wrist orientation. Bound only
+        # orientation; the pre-contact point still follows the actual hinge pose.
+        limit = np.deg2rad(self.args.approach_angle_limit_deg)
+        orientation_tangent = self.geometry(theta=np.clip(self.angle, -limit, limit))[2]
+        approach_rotation = facing_rotation(orientation_tangent)
         pre = point - (self.args.standoff + self.args.contact_clearance) * tangent
         lift, _ = self.tcp_pose()
         # Keep the clearance posture outside the panel half-space.

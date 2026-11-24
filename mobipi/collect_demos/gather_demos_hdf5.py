@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Gather RB-Y1 drawer demos from collect_close_drawer_demos.py into one robomimic HDF5.
+Gather successful RB-Y1 drawer or microwave source demos into one robomimic HDF5.
 
 Reads the successful demos listed in each input directory's manifest.csv (the
 raw DataCollectionWrapper episodes: model.xml, ep_meta.json, state_*.npz) and
@@ -61,6 +61,11 @@ def episode_dirs(input_dir):
     with (input_dir / "manifest.csv").open() as f:
         rows = list(csv.DictReader(f))
     for row in rows:
+        if "success" in row and row["success"].lower() not in ("true", "1"):
+            continue
+        if row.get("raw_demo"):
+            yield Path(row["raw_demo"]), row
+            continue
         demo_dir = Path(row["directory"])
         if not demo_dir.is_dir():
             # the batch directory may have been moved since collection
@@ -73,7 +78,7 @@ def episode_dirs(input_dir):
 
 # Per-episode or on-screen settings, not part of the environment definition
 EPISODE_KWARGS = ("env_name", "layout_ids", "style_ids", "seed", "has_renderer", "has_offscreen_renderer",
-                  "render_camera", "renderer", "use_camera_obs")
+                  "render_camera", "renderer", "use_camera_obs", "initial_door_angle_deg", "force_robot_placement")
 
 
 def recorded_env_kwargs(demo_dir):
@@ -142,6 +147,8 @@ def main():
                     raise RuntimeError(f"{ep_dir.parent} was collected with different environment settings "
                                        f"than {recorded_from}; gather them into separate datasets")
                 ep_meta = json.loads((ep_dir / "ep_meta.json").read_text())
+                if row.get("actual_initial_angle_deg"):
+                    ep_meta["initial_door_angle_deg"] = float(row["actual_initial_angle_deg"])
                 layouts.add(int(ep_meta["layout_id"]))
                 styles.add(int(ep_meta["style_id"]))
 
@@ -151,6 +158,12 @@ def main():
                 grp.attrs["ep_meta"] = json.dumps(ep_meta, indent=4)
                 grp.attrs["num_samples"] = len(actions)
                 grp.attrs["source"] = str(ep_dir)
+                if row.get("seed"):
+                    grp.attrs["seed"] = int(row["seed"])
+                if row.get("spawn_offset_y"):
+                    grp.attrs["spawn_offset_y"] = float(row["spawn_offset_y"])
+                if row.get("base_offset"):
+                    grp.attrs["base_offset_fixture_xy_yaw_deg"] = np.asarray(json.loads(row["base_offset"]), dtype=float)
                 grp.create_dataset("states", data=states)
                 grp.create_dataset("actions", data=actions)
                 grp.create_dataset("actions_abs", data=actions)
